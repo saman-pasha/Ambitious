@@ -2670,70 +2670,582 @@ static uint32_t re_source_text(js_vm *vm, uint32_t src) {
 static jv re_object(js_vm *vm, uint32_t re, uint32_t proto) {
     uint32_t o = js_obj_new(vm, JK_REGEXP, proto);
     vm->objs[o].a = re;
-    js_define(vm, o, A_LASTINDEX, jv_num(0), JS_SHAPE_HIDDEN);
+    /* writable, neither enumerable nor configurable (22.2.3.1) */
+    js_define(vm, o, A_LASTINDEX, jv_num(0), JS_SHAPE_HIDDEN | JS_SHAPE_FIXED);
     return jv_obj(o);
 }
 
 /* a literal's object: its regex compiled with the script */
 jv js_re_object(js_vm *vm, uint32_t re) { return re_object(vm, re, vm->regexp_proto); }
 
-/* a value as a regex for String's methods: a RegExp's own, or a new one of its text */
-static uint32_t re_of_value(js_vm *vm, jv v, uint32_t flags, jv *obj) {
-    if (jv_is_obj(v) && vm->objs[jv_idx(v)].kind == JK_REGEXP) { *obj = v; return vm->objs[jv_idx(v)].a; }
-    uint32_t src = v == JV_UNDEF ? A_EMPTY : js_to_string(vm, v);
-    if (!src) return 0;
-    uint32_t re = js_re_compile(vm, src, flags);
-    if (!re) return 0;
-    *obj = re_object(vm, re, vm->regexp_proto);
-    return re;
+/* ---- the RegExp protocol (ECMA-262 22.2.6, 22.2.7), as V8 keeps it ----
+   What the methods reach through properties: an exec the receiver has (RegExpExec), the Symbol methods String's
+   methods call, a subclass's species, the flags read by name. A RegExp no script has touched (re_plain: its own
+   properties as made, of a RegExp.prototype and a RegExp as the engine made them) is matched by the engine's own
+   matcher, its flags read from its regex, with nothing observable left out; any other receiver -- a subclass's
+   instance, an object with an exec of its own, any object at all -- the generic way, each property read and each
+   function called where the standard has it. */
+
+/* fn is RegExp's native which (its exec, its Symbol.match, ...) */
+static int re_native_is(js_vm *vm, jv fn, uint32_t which) {
+    return jv_is_obj(fn) && vm->objs[jv_idx(fn)].kind == JK_NATIVE && vm->objs[jv_idx(fn)].a == vm->re_first + which;
 }
 
-/* the matches of a global regex as an array of exec's results, from its lastIndex (matchAll's) */
-static jv re_all_results(js_vm *vm, jv rxv, uint32_t re, uint32_t s) {
-    uint32_t arr = js_array_new(vm, 0);
-    int uni = (vm->regexes[re].flags & (RF_U | RF_V)) != 0;
-    for (;;) {
-        int rc = re_builtin_exec(vm, rxv, re, s);
-        if (rc < 0) return JV_HOLE;
-        if (rc == 0) break;
-        uint32_t a = vm->re_caps[0], b = vm->re_caps[1];
-        jv m = re_result(vm, re, s);
-        js_array_push(vm, arr, m);
-        if (!(vm->regexes[re].flags & (RF_G | RF_Y))) break;
-        if (a == b) {
-            js_set(vm, rxv, A_LASTINDEX, jv_num(re_advance(vm, s, b, uni)));
+/* the regexp protector: RegExp.prototype and RegExp as the engine made them -- their shapes, and each property the
+   methods read still holding the value the engine put there (an accessor its getter): js_re_guard. n the guards to
+   check, the first n (1: exec alone, what RegExpExec reads) */
+static int re_pristine(js_vm *vm, uint32_t n) {
+    uint32_t rp = vm->regexp_proto, rc = vm->regexp_ctor;
+    if (!vm->re_guard_n || vm->objs[rp].shape != vm->re_proto_shape || vm->objs[rc].shape != vm->re_ctor_shape) return 0;
+    if (n > vm->re_guard_n) n = vm->re_guard_n;
+    for (uint32_t i = 0; i < n; i++) {
+        jv v = vm->slots[vm->objs[vm->re_guard_obj[i]].slots + vm->re_guard_slot[i]];
+        if (v != vm->re_guard_val[i]) return 0;
+        if (vm->re_guard_get[i] != JV_HOLE && vm->objs[jv_idx(v)].x != vm->re_guard_get[i]) return 0;
+    }
+    return 1;
+}
+
+/* a RegExp the engine's matcher may serve: its own properties as made (lastIndex alone, writable), its prototype
+   RegExp.prototype, the protector whole */
+static int re_plain(js_vm *vm, jv rxv) {
+    if (!jv_is_obj(rxv)) return 0;
+    uint32_t o = jv_idx(rxv);
+    return vm->objs[o].kind == JK_REGEXP && vm->objs[o].shape == vm->re_root_shape && re_pristine(vm, 20);
+}
+
+/* the protector's record, made once every built-in is: RegExp.prototype's exec (first), flags, the flags' getters,
+   constructor and Symbol methods, and RegExp's Symbol.species -- each one's slot, its value and an accessor's getter --
+   with the shapes of the two and of a RegExp as made. Anything not as expected leaves none, every RegExp then
+   matched the generic way */
+void js_re_guard(js_vm *vm) {
+    static const char *const names[] = { "exec", "flags", "global", "ignoreCase", "multiline", "dotAll", "unicode",
+                                         "unicodeSets", "sticky", "hasIndices", "constructor" };
+    static const uint32_t syms[] = { JSYM_MATCH, JSYM_MATCH_ALL, JSYM_REPLACE, JSYM_SEARCH, JSYM_SPLIT };
+    uint32_t rp = vm->regexp_proto, rc = vm->regexp_ctor, n = 0;
+    vm->re_guard_n = 0;
+    if (!rp || !rc) return;
+    for (uint32_t i = 0; i < 17; i++) {
+        uint32_t o = i < 16 ? rp : rc;
+        uint32_t key = i < 11 ? js_atom_ascii(vm, names[i]) : i < 16 ? (JS_SYM_KEY | syms[i - 11]) : (JS_SYM_KEY | JSYM_SPECIES);
+        uint32_t e = js_shape_find(vm, vm->objs[o].shape, key);
+        if (!e) return;
+        jv v = vm->slots[vm->objs[o].slots + vm->shapes[e].slot];
+        if (!jv_is_obj(v)) return;
+        jv get = JV_HOLE;
+        if (vm->shapes[e].flags & JS_SHAPE_ACCESSOR) {
+            get = vm->objs[jv_idx(v)].x;
+            if (!jv_is_obj(get) || vm->objs[jv_idx(get)].kind != JK_NATIVE) return;
+        } else if (vm->objs[jv_idx(v)].kind != JK_NATIVE) return;
+        vm->re_guard_obj[n] = o;
+        vm->re_guard_slot[n] = vm->shapes[e].slot;
+        vm->re_guard_val[n] = v;
+        vm->re_guard_get[n] = get;
+        n++;
+    }
+    uint32_t re = js_re_compile(vm, A_EMPTY, 0);
+    if (!re) return;
+    vm->re_root_shape = vm->objs[jv_idx(re_object(vm, re, rp))].shape;
+    vm->re_proto_shape = vm->objs[rp].shape;
+    vm->re_ctor_shape = vm->objs[rc].shape;
+    vm->re_guard_n = n;
+}
+
+/* RegExpExec (ECMA-262 22.2.7.1): R's exec called when it is callable and not the engine's (its result an object or
+   null, else V8's TypeError); else R's own matcher, R a RegExp. The result, JV_NULL for none, JV_HOLE thrown */
+static jv re_exec_any(js_vm *vm, jv rxv, uint32_t s) {
+    uint32_t o = jv_is_obj(rxv) ? jv_idx(rxv) : 0;
+    if (!o || vm->objs[o].kind != JK_REGEXP || vm->objs[o].shape != vm->re_root_shape || !re_pristine(vm, 1)) {
+        jv ex = js_get(vm, rxv, js_atom_ascii(vm, "exec"));
+        if (vm->throwing) return JV_HOLE;
+        if (js_is_callable(vm, ex) && !re_native_is(vm, ex, JRE_EXEC)) {
+            jv av[1] = { jv_str(s) };
+            jv r = js_call(vm, ex, rxv, av, 1);
             if (vm->throwing) return JV_HOLE;
+            if (!jv_is_obj(r) && r != JV_NULL)
+                return js_throw_msg(vm, vm->type_error_proto, "RegExp exec method returned something other than an Object or null");
+            return r;
         }
     }
+    uint32_t re = re_this(vm, rxv, "RegExp.prototype.exec");
+    if (!re) return JV_HOLE;
+    int rc = re_builtin_exec(vm, rxv, re, s);
+    if (rc < 0) return JV_HOLE;
+    return rc ? re_result(vm, re, s) : JV_NULL;
+}
+
+/* Set(R, "lastIndex", v, true): a RegExp's own property written (V8's TypeError when it is read-only), any other
+   object's set, its refusal thrown. 1, 0 thrown */
+static int re_put_last(js_vm *vm, jv rxv, jv v) {
+    if (jv_is_obj(rxv) && vm->objs[jv_idx(rxv)].kind == JK_REGEXP) return re_set_last(vm, rxv, v);
+    return js_set_throw(vm, rxv, jv_str(A_LASTINDEX), v);
+}
+
+/* V8's fullUnicode for a global match (unicode read, then unicodeSets) or replace (unicode alone). 1, 0; -1 thrown */
+static int re_get_unicode(js_vm *vm, jv rxv, int sets) {
+    jv u = js_get(vm, rxv, js_atom_ascii(vm, "unicode"));
+    if (vm->throwing) return -1;
+    if (js_truthy(vm, u)) return 1;
+    if (!sets) return 0;
+    jv v = js_get(vm, rxv, js_atom_ascii(vm, "unicodeSets"));
+    if (vm->throwing) return -1;
+    return js_truthy(vm, v) ? 1 : 0;
+}
+
+/* whether a flags text holds the flag c */
+static int re_has_flag(js_vm *vm, uint32_t fs, uint16_t c) {
+    js_str_flatten(vm, fs);
+    for (uint32_t i = 0; i < vm->strs[fs].len; i++) if (vm->units[vm->strs[fs].off + i] == c) return 1;
+    return 0;
+}
+
+/* a global match's, replace's or matchAll's step past an empty match (22.2.6.8 6.e.iii): the match's text read (into
+   *text), and when it is empty lastIndex moved on from its ToLength. 1, 0 thrown */
+static int re_bump_empty(js_vm *vm, jv rxv, jv result, uint32_t s, int uni, uint32_t *text) {
+    jv m0 = js_get_value(vm, result, jv_num(0));
+    if (vm->throwing) return 0;
+    uint32_t ms = js_to_string(vm, m0);
+    if (!ms) return 0;
+    if (text) *text = ms;
+    if (vm->strs[ms].len) return 1;
+    jv li = js_get(vm, rxv, A_LASTINDEX);
+    if (vm->throwing) return 0;
+    double t = re_to_length(vm, li);
+    if (vm->throwing) return 0;
+    js_str_flatten(vm, s);
+    double nx = t + 1;
+    if (uni && t + 1 < vm->strs[s].len) nx = (double)re_advance(vm, s, (uint32_t)t, 1);
+    return re_put_last(vm, rxv, jv_num(nx));
+}
+
+/* RegExp.prototype[Symbol.match] (22.2.6.8) on any receiver, read as V8 reads it (global, then unicode; not flags) */
+static jv re_m_match(js_vm *vm, jv rxv, uint32_t s, int plain) {
+    if (plain) {
+        uint32_t re = vm->objs[jv_idx(rxv)].a;
+        if (!(vm->regexes[re].flags & RF_G)) {
+            int rc = re_builtin_exec(vm, rxv, re, s);
+            if (rc < 0) return JV_HOLE;
+            return rc ? re_result(vm, re, s) : JV_NULL;
+        }
+        vector<uint32_t> all;
+        if (!re_global_matches(vm, rxv, re, s, 2, &all)) return JV_HOLE;
+        uint32_t nm = (uint32_t)(len(all) / 2);
+        if (!nm) return JV_NULL;
+        uint32_t arr = js_array_new(vm, nm);
+        for (uint32_t m = 0; m < nm; m++) js_array_set(vm, arr, m, jv_str(js_str_sub(vm, s, all[2 * m], all[2 * m + 1])));
+        return jv_obj(arr);
+    }
+    jv g = js_get(vm, rxv, js_atom_ascii(vm, "global"));
+    if (vm->throwing) return JV_HOLE;
+    if (!js_truthy(vm, g)) return re_exec_any(vm, rxv, s);
+    int uni = re_get_unicode(vm, rxv, 1);
+    if (uni < 0) return JV_HOLE;
+    if (!re_put_last(vm, rxv, jv_num(0))) return JV_HOLE;
+    uint32_t arr = 0;
+    for (;;) {
+        jv r = re_exec_any(vm, rxv, s);
+        if (r == JV_HOLE) return JV_HOLE;
+        if (r == JV_NULL) return arr ? jv_obj(arr) : JV_NULL;
+        uint32_t ms = 0;
+        if (!re_bump_empty(vm, rxv, r, s, uni, &ms)) return JV_HOLE;
+        if (!arr) arr = js_array_new(vm, 0);
+        js_array_push(vm, arr, jv_str(ms));
+    }
+}
+
+/* RegExp.prototype[Symbol.search] (22.2.6.12): lastIndex set to 0 for the search, then put back, each write only when
+   the value differs (a frozen RegExp searches when its lastIndex is 0 and not g or y) */
+static jv re_m_search(js_vm *vm, jv rxv, uint32_t s, int plain) {
+    jv prev = js_get(vm, rxv, A_LASTINDEX);
+    if (vm->throwing) return JV_HOLE;
+    if (!re_same(vm, prev, jv_num(0)) && !re_put_last(vm, rxv, jv_num(0))) return JV_HOLE;
+    jv r = JV_NULL;
+    double at = -1;
+    if (plain) {
+        int rc = re_builtin_exec(vm, rxv, vm->objs[jv_idx(rxv)].a, s);
+        if (rc < 0) return JV_HOLE;
+        if (rc) at = (double)vm->re_caps[0];
+    } else {
+        r = re_exec_any(vm, rxv, s);
+        if (r == JV_HOLE) return JV_HOLE;
+    }
+    jv cur = js_get(vm, rxv, A_LASTINDEX);
+    if (vm->throwing) return JV_HOLE;
+    if (!re_same(vm, cur, prev) && !re_put_last(vm, rxv, prev)) return JV_HOLE;
+    if (plain) return jv_num(at);
+    if (r == JV_NULL) return jv_num(-1);
+    return js_get(vm, r, A_INDEX);
+}
+
+/* GetSubstitution (22.1.3.19.1) for a match the generic way gave: its captures strings or undefined, its named
+   captures an object or undefined. 1, 0 thrown */
+static int re_substitute_any(js_vm *vm, uint32_t matched, uint32_t s, uint32_t position, const jv *caps, uint32_t ncaps,
+                             jv named, uint32_t tpl, vector<uint16_t> *out) {
+    js_str_flatten(vm, tpl);
+    js_str_flatten(vm, s);
+    js_str_flatten(vm, matched);
+    uint32_t tn = vm->strs[tpl].len, sn = vm->strs[s].len;
+    for (uint32_t i = 0; i < tn;) {
+        uint16_t c = vm->units[vm->strs[tpl].off + i];
+        if (c != '$' || i + 1 >= tn) { push_back(*out, c); i++; continue; }
+        uint16_t d = vm->units[vm->strs[tpl].off + i + 1];
+        if (d == '$') { push_back(*out, (uint16_t)'$'); i += 2; continue; }
+        if (d == '&') { re_append(vm, matched, 0, vm->strs[matched].len, out); i += 2; continue; }
+        if (d == '`') { re_append(vm, s, 0, position < sn ? position : sn, out); i += 2; continue; }
+        if (d == '\'') {
+            uint64_t tail = (uint64_t)position + vm->strs[matched].len;
+            if (tail < sn) re_append(vm, s, (uint32_t)tail, sn, out);
+            i += 2;
+            continue;
+        }
+        if (d >= '0' && d <= '9') {
+            uint16_t e = i + 2 < tn ? vm->units[vm->strs[tpl].off + i + 2] : 0;
+            uint32_t digits = e >= '0' && e <= '9' ? 2 : 1;
+            uint32_t index = digits == 2 ? (uint32_t)(d - '0') * 10 + (uint32_t)(e - '0') : (uint32_t)(d - '0');
+            if (index > ncaps && digits == 2) { digits = 1; index = (uint32_t)(d - '0'); }
+            if (index >= 1 && index <= ncaps) {
+                jv cv = caps[index - 1];
+                if (jv_is_str(cv)) re_append(vm, jv_idx(cv), 0, vm->strs[jv_idx(cv)].len, out);
+            } else re_append(vm, tpl, i, i + 1 + digits, out);
+            i += 1 + digits;
+            continue;
+        }
+        if (d == '<') {
+            uint32_t gt = i + 2;
+            while (gt < tn && vm->units[vm->strs[tpl].off + gt] != '>') gt++;
+            if (gt >= tn || named == JV_UNDEF) { push_back(*out, (uint16_t)'$'); push_back(*out, (uint16_t)'<'); i += 2; continue; }
+            jv cap = js_get_value(vm, named, jv_str(js_str_sub(vm, tpl, i + 2, gt)));
+            if (vm->throwing) return 0;
+            if (cap != JV_UNDEF) {
+                uint32_t cs = js_to_string(vm, cap);
+                if (!cs) return 0;
+                re_append(vm, cs, 0, vm->strs[cs].len, out);
+            }
+            i = gt + 1;
+            continue;
+        }
+        push_back(*out, (uint16_t)'$');
+        i++;
+    }
+    return 1;
+}
+
+/* RegExp.prototype[Symbol.replace] (22.2.6.11) on any receiver, read as V8 reads it (global, then unicode alone): every
+   match RegExpExec gives, then each one's text, place, captures and groups read and its replacement made */
+static jv re_m_replace(js_vm *vm, jv rxv, uint32_t s, jv rep, int plain) {
+    if (plain) return re_replace(vm, rxv, vm->objs[jv_idx(rxv)].a, s, rep);
+    js_str_flatten(vm, s);
+    uint32_t sn = vm->strs[s].len;
+    int fn = js_is_callable(vm, rep);
+    uint32_t tpl = 0;
+    if (!fn) { tpl = js_to_string(vm, rep); if (!tpl) return JV_HOLE; }
+    jv g = js_get(vm, rxv, js_atom_ascii(vm, "global"));
+    if (vm->throwing) return JV_HOLE;
+    int global = js_truthy(vm, g), uni = 0;
+    if (global) {
+        uni = re_get_unicode(vm, rxv, 0);
+        if (uni < 0) return JV_HOLE;
+        if (!re_put_last(vm, rxv, jv_num(0))) return JV_HOLE;
+    }
+    vector<jv> results;
+    for (;;) {
+        jv r = re_exec_any(vm, rxv, s);
+        if (r == JV_HOLE) return JV_HOLE;
+        if (r == JV_NULL) break;
+        push_back(results, r);
+        if (!global) break;
+        if (!re_bump_empty(vm, rxv, r, s, uni, 0)) return JV_HOLE;
+    }
+    vector<uint16_t> out;
+    uint32_t next = 0;
+    for (size_t k = 0; k < len(results); k++) {
+        jv r = results[k];
+        jv lv = js_get(vm, r, A_LENGTH);
+        if (vm->throwing) return JV_HOLE;
+        double rl = re_to_length(vm, lv);
+        if (vm->throwing) return JV_HOLE;
+        /* (a length past any regex's groups is a script's: its captures read up to a bound) */
+        uint32_t ncap = rl > 1 ? (rl - 1 > 65535 ? 65535 : (uint32_t)(rl - 1)) : 0;
+        jv m0 = js_get_value(vm, r, jv_num(0));
+        if (vm->throwing) return JV_HOLE;
+        uint32_t matched = js_to_string(vm, m0);
+        if (!matched) return JV_HOLE;
+        uint32_t mlen = vm->strs[matched].len;
+        jv pv = js_get(vm, r, A_INDEX);
+        if (vm->throwing) return JV_HOLE;
+        double pd = js_to_number(vm, pv);
+        if (vm->throwing) return JV_HOLE;
+        pd = pd != pd ? 0 : trunc(pd);
+        uint32_t pos = pd <= 0 ? 0 : pd >= sn ? sn : (uint32_t)pd;
+        vector<jv> caps;
+        for (uint32_t n = 1; n <= ncap; n++) {
+            jv cv = js_get_value(vm, r, jv_num(n));
+            if (vm->throwing) return JV_HOLE;
+            if (cv != JV_UNDEF) {
+                uint32_t cs = js_to_string(vm, cv);
+                if (!cs) return JV_HOLE;
+                cv = jv_str(cs);
+            }
+            push_back(caps, cv);
+        }
+        jv named = js_get(vm, r, js_atom_ascii(vm, "groups"));
+        if (vm->throwing) return JV_HOLE;
+        vector<uint16_t> piece;
+        if (fn) {
+            vector<jv> av;
+            push_back(av, jv_str(matched));
+            for (size_t c = 0; c < len(caps); c++) push_back(av, caps[c]);
+            push_back(av, jv_num(pos));
+            push_back(av, jv_str(s));
+            if (named != JV_UNDEF) push_back(av, named);
+            jv rv = js_call(vm, rep, JV_UNDEF, data(av), (uint32_t)len(av));
+            if (vm->throwing) return JV_HOLE;
+            uint32_t rs = js_to_string(vm, rv);
+            if (!rs) return JV_HOLE;
+            re_append(vm, rs, 0, vm->strs[rs].len, &piece);
+        } else {
+            if (named != JV_UNDEF) {
+                named = js_to_object(vm, named);
+                if (vm->throwing) return JV_HOLE;
+            }
+            if (!re_substitute_any(vm, matched, s, pos, data(caps), (uint32_t)len(caps), named, tpl, &piece)) return JV_HOLE;
+        }
+        if (pos >= next) {
+            re_append(vm, s, next, pos, &out);
+            if (len(piece)) append_range(out, data(piece), len(piece));
+            next = pos + mlen;
+        }
+    }
+    if (next < sn) re_append(vm, s, next, sn, &out);
+    return jv_str(js_str_new(vm, data(out), len(out)));
+}
+
+/* SpeciesConstructor(rx, %RegExp%) (7.3.22): the constructor split and matchAll make their matcher with. JV_HOLE thrown */
+static jv re_species_ctor(js_vm *vm, jv rxv) {
+    jv c = js_get(vm, rxv, A_CONSTRUCTOR);
+    if (vm->throwing) return JV_HOLE;
+    if (c == JV_UNDEF) return jv_obj(vm->regexp_ctor);
+    if (!jv_is_obj(c)) return js_throw_msg(vm, vm->type_error_proto, "The .constructor property is not an object");
+    jv sp = js_get(vm, c, JS_SYM_KEY | JSYM_SPECIES);
+    if (vm->throwing) return JV_HOLE;
+    if (jv_is_nullish(sp)) return jv_obj(vm->regexp_ctor);
+    if (!js_is_constructor(vm, sp)) return js_throw_msg(vm, vm->type_error_proto, "object.constructor[Symbol.species] is not a constructor");
+    return sp;
+}
+
+/* RegExp.prototype[Symbol.split] (22.2.6.14): the splitter the species makes of rx and its flags with y, each place
+   tried by RegExpExec; a plain RegExp split by its own regex */
+static jv re_m_split(js_vm *vm, jv rxv, uint32_t s, jv limit, int plain) {
+    if (plain) return re_split(vm, vm->objs[jv_idx(rxv)].a, s, limit);
+    jv c = re_species_ctor(vm, rxv);
+    if (c == JV_HOLE) return JV_HOLE;
+    jv fl = js_get(vm, rxv, js_atom_ascii(vm, "flags"));
+    if (vm->throwing) return JV_HOLE;
+    uint32_t fs = js_to_string(vm, fl);
+    if (!fs) return JV_HOLE;
+    int uni = re_has_flag(vm, fs, 'u') || re_has_flag(vm, fs, 'v');
+    uint32_t nf = re_has_flag(vm, fs, 'y') ? fs : js_str_concat(vm, fs, js_str_ascii(vm, "y"));
+    jv av[2] = { rxv, jv_str(nf) };
+    jv sp = js_construct(vm, c, av, 2, c);
+    if (vm->throwing) return JV_HOLE;
+    uint32_t lim = 0xFFFFFFFFu;
+    if (limit != JV_UNDEF) {
+        double d = js_to_number(vm, limit);
+        if (vm->throwing) return JV_HOLE;
+        lim = (uint32_t)js_to_int32(d);
+    }
+    uint32_t arr = js_array_new(vm, 0);
+    if (lim == 0) return jv_obj(arr);
+    js_str_flatten(vm, s);
+    uint32_t size = vm->strs[s].len;
+    if (size == 0) {
+        jv z = re_exec_any(vm, sp, s);
+        if (z == JV_HOLE) return JV_HOLE;
+        if (z == JV_NULL) js_array_push(vm, arr, jv_str(s));
+        return jv_obj(arr);
+    }
+    uint32_t p = 0, q = 0;
+    while (q < size) {
+        if (!re_put_last(vm, sp, jv_num(q))) return JV_HOLE;
+        jv z = re_exec_any(vm, sp, s);
+        if (z == JV_HOLE) return JV_HOLE;
+        if (z == JV_NULL) { q = re_advance(vm, s, q, uni); continue; }
+        jv ev = js_get(vm, sp, A_LASTINDEX);
+        if (vm->throwing) return JV_HOLE;
+        double ed = re_to_length(vm, ev);
+        if (vm->throwing) return JV_HOLE;
+        uint32_t e = ed > size ? size : (uint32_t)ed;
+        if (e == p) { q = re_advance(vm, s, q, uni); continue; }
+        js_array_push(vm, arr, jv_str(js_str_sub(vm, s, p, q)));
+        if (vm->objs[arr].b == lim) return jv_obj(arr);
+        p = e;
+        jv nl = js_get(vm, z, A_LENGTH);
+        if (vm->throwing) return JV_HOLE;
+        double nc = re_to_length(vm, nl);
+        if (vm->throwing) return JV_HOLE;
+        for (double i = 1; i < nc && i <= 65535; i++) {
+            jv cap = js_get_value(vm, z, jv_num(i));
+            if (vm->throwing) return JV_HOLE;
+            js_array_push(vm, arr, cap);
+            if (vm->objs[arr].b == lim) return jv_obj(arr);
+        }
+        q = p;
+    }
+    js_array_push(vm, arr, jv_str(js_str_sub(vm, s, p, size)));
     return jv_obj(arr);
 }
 
-/* SpeciesConstructor(rx, %RegExp%) and its object, as split and matchAll make their matcher (ECMA-262 22.2.6.9,
-   22.2.6.14): rx's constructor's Symbol.species read, and, when it is another constructor, new C(rx, flags) made (its
-   object, a RegExp, matchAll's matcher in *made); the matching itself by rx's own regex. 0 thrown, else 1 */
-static int re_species(js_vm *vm, jv rxv, jv *made) {
-    *made = JV_UNDEF;
-    if (!jv_is_obj(rxv)) return 1;
-    jv c = js_get(vm, rxv, A_CONSTRUCTOR);
-    if (vm->throwing) return 0;
-    if (c == JV_UNDEF) return 1;
-    if (!jv_is_obj(c)) { js_throw_msg(vm, vm->type_error_proto, "The .constructor property is not an object"); return 0; }
-    jv sp = js_get(vm, c, JS_SYM_KEY | JSYM_SPECIES);
-    if (vm->throwing) return 0;
-    if (jv_is_nullish(sp)) return 1;
-    jv pr = JV_UNDEF;
-    uint32_t f = 0;
-    if (jv_is_obj(sp) && vm->objs[jv_idx(sp)].kind == JK_NATIVE && js_get_own(vm, jv_idx(sp), A_PROTOTYPE, &pr, &f) && pr == jv_obj(vm->regexp_proto)) return 1;
-    if (!js_is_constructor(vm, sp)) { js_throw_msg(vm, vm->type_error_proto, "object.constructor[Symbol.species] is not a constructor"); return 0; }
-    jv fl = js_get(vm, rxv, js_atom_ascii(vm, "flags"));
-    if (vm->throwing) return 0;
-    uint32_t fs = js_to_string(vm, fl);
-    if (!fs) return 0;
-    jv av[2] = { rxv, jv_str(fs) };
-    jv r = js_construct(vm, sp, av, 2, sp);
-    if (vm->throwing) return 0;
-    if (jv_is_obj(r) && vm->objs[jv_idx(r)].kind == JK_REGEXP) *made = r;
+/* RegExp.prototype[Symbol.matchAll] (22.2.6.9): the matcher (a plain RegExp's copy; else what the species makes of rx
+   and its flags), lastIndex carried over, and the iterator over its matches, found as it is stepped (js_re_iter_step):
+   a its matcher, x the string, b its flags (1 g, 2 u or v) and 4 once done */
+static jv re_m_matchall(js_vm *vm, jv rxv, uint32_t s, int plain) {
+    jv m;
+    uint32_t bits = 0;
+    if (plain) {
+        uint32_t re = vm->objs[jv_idx(rxv)].a, f = vm->regexes[re].flags;
+        jv li = js_get(vm, rxv, A_LASTINDEX);
+        if (vm->throwing) return JV_HOLE;
+        double l = re_to_length(vm, li);
+        if (vm->throwing) return JV_HOLE;
+        m = re_object(vm, re, vm->regexp_proto);
+        js_set(vm, m, A_LASTINDEX, jv_num(l));
+        bits = ((f & RF_G) ? 1u : 0u) | ((f & (RF_U | RF_V)) ? 2u : 0u);
+    } else {
+        jv c = re_species_ctor(vm, rxv);
+        if (c == JV_HOLE) return JV_HOLE;
+        jv fl = js_get(vm, rxv, js_atom_ascii(vm, "flags"));
+        if (vm->throwing) return JV_HOLE;
+        uint32_t fs = js_to_string(vm, fl);
+        if (!fs) return JV_HOLE;
+        jv av[2] = { rxv, jv_str(fs) };
+        m = js_construct(vm, c, av, 2, c);
+        if (vm->throwing) return JV_HOLE;
+        jv li = js_get(vm, rxv, A_LASTINDEX);
+        if (vm->throwing) return JV_HOLE;
+        double l = re_to_length(vm, li);
+        if (vm->throwing) return JV_HOLE;
+        if (!re_put_last(vm, m, jv_num(l))) return JV_HOLE;
+        bits = (re_has_flag(vm, fs, 'g') ? 1u : 0u) | (re_has_flag(vm, fs, 'u') || re_has_flag(vm, fs, 'v') ? 2u : 0u);
+    }
+    uint32_t it = js_obj_new(vm, JK_ITER, vm->regexp_iter_proto);
+    vm->objs[it].a = jv_idx(m);
+    vm->objs[it].x = jv_str(s);
+    vm->objs[it].b = bits;
+    vm->objs[it].c = JI_REGEXP;
+    return jv_obj(it);
+}
+
+/* %RegExpStringIteratorPrototype%.next's step (22.2.9.2.1): the matcher's next match by RegExpExec; with g, past an
+   empty one lastIndex moved on; without, done after the first. 1 a match in *out; 0 done or thrown (a throw leaves it
+   to be stepped again, as V8's does) */
+int js_re_iter_step(js_vm *vm, uint32_t it, jv *out) {
+    uint32_t bits = vm->objs[it].b;
+    if (bits & 4) return 0;
+    jv m = jv_obj(vm->objs[it].a);
+    uint32_t s = jv_idx(vm->objs[it].x);
+    jv r = re_exec_any(vm, m, s);
+    if (r == JV_HOLE) return 0;
+    if (r == JV_NULL) { vm->objs[it].b = bits | 4; return 0; }
+    if (!(bits & 1)) vm->objs[it].b = bits | 4;
+    else if (!re_bump_empty(vm, m, r, s, (bits & 2) != 0, 0)) return 0;
+    *out = r;
     return 1;
+}
+
+/* IsRegExp (7.2.8): an object whose Symbol.match is truthy, or, that undefined, a RegExp. 1, 0; -1 thrown */
+int js_is_regexp(js_vm *vm, jv v) {
+    if (!jv_is_obj(v)) return 0;
+    jv m = js_get(vm, v, JS_SYM_KEY | JSYM_MATCH);
+    if (vm->throwing) return -1;
+    if (m != JV_UNDEF) return js_truthy(vm, m) ? 1 : 0;
+    return vm->objs[jv_idx(v)].kind == JK_REGEXP;
+}
+
+/* GetMethod(v, Symbol[sym]) (7.3.11) as String's methods ask it: undefined for none; one not callable a TypeError in
+   the words V8's method uses (prop: "'5' returned for property 'Symbol(Symbol.match)' of object '#<Object>' is not a
+   function"; else "number 5 is not a function"). JV_HOLE thrown */
+static jv re_get_method(js_vm *vm, jv v, uint32_t sym, int prop) {
+    jv f = js_get(vm, v, JS_SYM_KEY | sym);
+    if (vm->throwing) return JV_HOLE;
+    if (jv_is_nullish(f)) return JV_UNDEF;
+    if (js_is_callable(vm, f)) return f;
+    if (!prop) return js_not_function(vm, f);
+    const char *nm = sym == JSYM_MATCH ? "Symbol.match" : sym == JSYM_MATCH_ALL ? "Symbol.matchAll" :
+                     sym == JSYM_REPLACE ? "Symbol.replace" : sym == JSYM_SEARCH ? "Symbol.search" : "Symbol.split";
+    const char *mid = "' returned for property 'Symbol(", *mid2 = ")' of object '", *end = "' is not a function";
+    vector<char> m;
+    push_back(m, '\'');
+    js_value_text(vm, f, &m);
+    append_range(m, mid, strlen(mid));
+    append_range(m, nm, strlen(nm));
+    append_range(m, mid2, strlen(mid2));
+    js_value_text(vm, v, &m);
+    append_range(m, end, strlen(end));
+    push_back(m, 0);
+    return js_throw_msg(vm, vm->type_error_proto, data(m));
+}
+
+/* RegExpCreate(P, F) (22.2.3.1): a RegExp of P's text (undefined: none) and the flags. JV_HOLE thrown */
+static jv re_create(js_vm *vm, jv p, uint32_t flags) {
+    uint32_t src = p == JV_UNDEF ? A_EMPTY : js_to_string(vm, p);
+    if (!src) return JV_HOLE;
+    uint32_t re = js_re_compile(vm, src, flags);
+    if (!re) return JV_HOLE;
+    return re_object(vm, re, vm->regexp_proto);
+}
+
+/* RegExp.prototype's Symbol method which (JRE_MATCH, JRE_SEARCH, JRE_MATCHALL) on rx and s, plain re_plain's answer */
+static jv re_method(js_vm *vm, uint32_t which, jv rxv, uint32_t s, int plain) {
+    if (which == JRE_MATCH) return re_m_match(vm, rxv, s, plain);
+    if (which == JRE_SEARCH) return re_m_search(vm, rxv, s, plain);
+    return re_m_matchall(vm, rxv, s, plain);
+}
+
+/* Invoke(rx, Symbol[sym], s) for a RegExp RegExpCreate made: the engine's method while the protector holds */
+static jv re_invoke(js_vm *vm, jv rx, uint32_t sym, uint32_t which, uint32_t s) {
+    if (re_plain(vm, rx)) return re_method(vm, which, rx, s, 1);
+    jv f = js_get(vm, rx, JS_SYM_KEY | sym);
+    if (vm->throwing) return JV_HOLE;
+    if (!js_is_callable(vm, f)) return js_not_function(vm, f);
+    jv av[1] = { jv_str(s) };
+    return js_call(vm, f, rx, av, 1);
+}
+
+/* String.prototype.replace, replaceAll and split with a pattern of any kind (22.1.3.19, .20, .23): the pattern's
+   Symbol.replace (Symbol.split) called when it has one, replaceAll's RegExp refused unless global, a plain RegExp's
+   served by the engine. 1 done (*out), 0 none (the string's own way then), -1 thrown */
+int js_re_string_method(js_vm *vm, uint32_t sym, int all, jv thisv, jv a0, jv a1, jv *out) {
+    if (jv_is_nullish(a0)) return 0;
+    int plain = re_plain(vm, a0);
+    if (all) {
+        int g = 1;
+        if (plain) g = (vm->regexes[vm->objs[jv_idx(a0)].a].flags & RF_G) != 0;
+        else {
+            int isre = js_is_regexp(vm, a0);
+            if (isre < 0) return -1;
+            if (isre) {
+                jv fl = js_get(vm, a0, js_atom_ascii(vm, "flags"));
+                if (vm->throwing) return -1;
+                if (jv_is_nullish(fl)) { js_throw_msg(vm, vm->type_error_proto, "String.prototype.replaceAll called on null or undefined"); return -1; }
+                uint32_t fs = js_to_string(vm, fl);
+                if (!fs) return -1;
+                g = re_has_flag(vm, fs, 'g');
+            }
+        }
+        if (!g) { js_throw_msg(vm, vm->type_error_proto, "String.prototype.replaceAll called with a non-global RegExp argument"); return -1; }
+    }
+    if (plain) {
+        uint32_t s = js_to_string(vm, thisv);
+        if (!s) return -1;
+        *out = sym == JSYM_SPLIT ? re_m_split(vm, a0, s, a1, 1) : re_m_replace(vm, a0, s, a1, 1);
+        return *out == JV_HOLE ? -1 : 1;
+    }
+    jv f = re_get_method(vm, a0, sym, all);
+    if (f == JV_HOLE) return -1;
+    if (f == JV_UNDEF) return 0;
+    jv av[2] = { thisv, a1 };
+    *out = js_call(vm, f, a0, av, 2);
+    return vm->throwing ? -1 : 1;
 }
 
 jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt) {
@@ -2741,8 +3253,13 @@ jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, u
     jv a0 = re_arg(vm, args, argc, 0), a1 = re_arg(vm, args, argc, 1);
     switch (which) {
     case JRE_CTOR: {
+        /* the pattern a RegExp (its own source and flags), else one IsRegExp says is (an object with a truthy
+           Symbol.match: its source and flags read), else text; RegExp(p) without new p itself when p is one whose
+           constructor is RegExp (22.2.4.1) */
         int is_re = jv_is_obj(a0) && vm->objs[jv_idx(a0)].kind == JK_REGEXP;
-        if ((newt == JV_UNDEF || newt == JV_HOLE) && is_re && a1 == JV_UNDEF) {
+        int like = js_is_regexp(vm, a0);
+        if (like < 0) return JV_HOLE;
+        if ((newt == JV_UNDEF || newt == JV_HOLE) && like && a1 == JV_UNDEF) {
             jv c = js_get(vm, a0, A_CONSTRUCTOR);
             if (vm->throwing) return JV_HOLE;
             if (c == callee) return a0;
@@ -2752,6 +3269,16 @@ jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, u
             js_regex r = vm->regexes[vm->objs[jv_idx(a0)].a];
             src = r.source;
             flags = r.flags;
+        } else if (like) {
+            jv sv = js_get(vm, a0, js_atom_ascii(vm, "source"));
+            if (vm->throwing) return JV_HOLE;
+            if (a1 == JV_UNDEF) {
+                a1 = js_get(vm, a0, js_atom_ascii(vm, "flags"));
+                if (vm->throwing) return JV_HOLE;
+            }
+            src = sv == JV_UNDEF ? A_EMPTY : js_to_string(vm, sv);
+            if (!src) return JV_HOLE;
+            flags = 0;
         } else {
             src = a0 == JV_UNDEF ? A_EMPTY : js_to_string(vm, a0);
             if (!src) return JV_HOLE;
@@ -2813,16 +3340,24 @@ jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, u
         js_set(vm, thisv, A_LASTINDEX, jv_num(0));
         return vm->throwing ? JV_HOLE : thisv;
     }
-    case JRE_EXEC: case JRE_TEST: {
-        /* test of an object that is no RegExp fails in the exec it falls back to, as V8's does */
-        uint32_t re = re_this(vm, thisv, which == JRE_EXEC || jv_is_obj(thisv) ? "RegExp.prototype.exec" : "RegExp.prototype.test");
+    case JRE_EXEC: {
+        uint32_t re = re_this(vm, thisv, "RegExp.prototype.exec");
         if (!re) return JV_HOLE;
         uint32_t s = js_to_string(vm, a0);
         if (!s) return JV_HOLE;
         int rc = re_builtin_exec(vm, thisv, re, s);
         if (rc < 0) return JV_HOLE;
-        if (which == JRE_TEST) return jv_bool(rc);
         return rc ? re_result(vm, re, s) : JV_NULL;
+    }
+    case JRE_TEST: {
+        /* RegExpExec's answer, any exec's (an object that is no RegExp, without one, fails in the matcher it falls back
+           to, as V8's does) */
+        if (!jv_is_obj(thisv)) { re_this(vm, thisv, "RegExp.prototype.test"); return JV_HOLE; }
+        uint32_t s = js_to_string(vm, a0);
+        if (!s) return JV_HOLE;
+        jv r = re_exec_any(vm, thisv, s);
+        if (r == JV_HOLE) return JV_HOLE;
+        return jv_bool(r != JV_NULL);
     }
     case JRE_TOSTRING: {
         if (!jv_is_obj(thisv)) { re_this(vm, thisv, "RegExp.prototype.toString"); return JV_HOLE; }
@@ -2874,129 +3409,67 @@ jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, u
         static const uint32_t bit[] = { RF_G, RF_I, RF_M, RF_S, RF_U, RF_V, RF_Y, RF_D };
         return jv_bool((vm->regexes[vm->objs[jv_idx(thisv)].a].flags & bit[which - JRE_GLOBAL]) != 0);
     }
-    case JRE_MATCH: case JRE_SP_MATCH: {
-        /* rx[Symbol.match](s), and s.match(rx) through it */
-        jv rxv = thisv;
-        uint32_t s, re;
-        if (which == JRE_SP_MATCH) {
-            if (jv_is_nullish(thisv)) return js_throw_msg(vm, vm->type_error_proto, "String.prototype.match called on null or undefined");
-            s = js_to_string(vm, thisv);
-            if (!s) return JV_HOLE;
-            re = re_of_value(vm, a0, 0, &rxv);
-        } else {
-            re = re_this(vm, thisv, "RegExp.prototype.@@match");
-            if (!re) return JV_HOLE;
-            s = js_to_string(vm, a0);
-            if (!s) return JV_HOLE;
+    case JRE_MATCH: case JRE_SEARCH: case JRE_MATCHALL: case JRE_REPLACE: case JRE_SPLIT: {
+        /* RegExp.prototype's Symbol methods, any object their receiver */
+        if (!jv_is_obj(thisv)) {
+            re_this(vm, thisv, which == JRE_MATCH ? "RegExp.prototype.@@match" : which == JRE_SEARCH ? "RegExp.prototype.@@search" :
+                               which == JRE_MATCHALL ? "RegExp.prototype.@@matchAll" : which == JRE_REPLACE ? "RegExp.prototype.@@replace" :
+                               "RegExp.prototype.@@split");
+            return JV_HOLE;
         }
-        if (!re) return JV_HOLE;
-        if (!(vm->regexes[re].flags & RF_G)) {
-            int rc = re_builtin_exec(vm, rxv, re, s);
-            if (rc < 0) return JV_HOLE;
-            return rc ? re_result(vm, re, s) : JV_NULL;
-        }
-        vector<uint32_t> all;
-        if (!re_global_matches(vm, rxv, re, s, 2, &all)) return JV_HOLE;
-        uint32_t nm = (uint32_t)(len(all) / 2);
-        if (!nm) return JV_NULL;
-        uint32_t arr = js_array_new(vm, nm);
-        for (uint32_t m = 0; m < nm; m++) js_array_set(vm, arr, m, jv_str(js_str_sub(vm, s, all[2 * m], all[2 * m + 1])));
-        return jv_obj(arr);
+        uint32_t s = js_to_string(vm, a0);
+        if (!s) return JV_HOLE;
+        int plain = re_plain(vm, thisv);
+        if (which == JRE_REPLACE) return re_m_replace(vm, thisv, s, a1, plain);
+        if (which == JRE_SPLIT) return re_m_split(vm, thisv, s, a1, plain);
+        return re_method(vm, which, thisv, s, plain);
     }
-    case JRE_MATCHALL: case JRE_SP_MATCHALL: {
-        jv rxv = thisv;
-        uint32_t s, re;
-        if (which == JRE_SP_MATCHALL) {
-            if (jv_is_nullish(thisv)) return js_throw_msg(vm, vm->type_error_proto, "String.prototype.matchAll called on null or undefined");
-            if (jv_is_obj(a0) && vm->objs[jv_idx(a0)].kind == JK_REGEXP && !(vm->regexes[vm->objs[jv_idx(a0)].a].flags & RF_G))
-                return js_throw_msg(vm, vm->type_error_proto, "String.prototype.matchAll called with a non-global RegExp argument");
-            s = js_to_string(vm, thisv);
-            if (!s) return JV_HOLE;
-            re = re_of_value(vm, a0, RF_G, &rxv);
-        } else {
-            re = re_this(vm, thisv, "RegExp.prototype.@@matchAll");
-            if (!re) return JV_HOLE;
-            s = js_to_string(vm, a0);
-            if (!s) return JV_HOLE;
+    case JRE_SP_MATCH: case JRE_SP_SEARCH: case JRE_SP_MATCHALL: {
+        /* String.prototype.match, search and matchAll (22.1.3.13, .14, .22): the pattern's own Symbol method when it has
+           one (matchAll's RegExp refused unless global), else a RegExp made of the pattern and its method */
+        if (jv_is_nullish(thisv) || thisv == JV_HOLE)
+            return js_throw_msg(vm, vm->type_error_proto, which == JRE_SP_MATCH ? "String.prototype.match called on null or undefined" :
+                                which == JRE_SP_SEARCH ? "String.prototype.search called on null or undefined" :
+                                "String.prototype.matchAll called on null or undefined");
+        uint32_t sym = which == JRE_SP_MATCH ? JSYM_MATCH : which == JRE_SP_SEARCH ? JSYM_SEARCH : JSYM_MATCH_ALL;
+        uint32_t mw = which == JRE_SP_MATCH ? JRE_MATCH : which == JRE_SP_SEARCH ? JRE_SEARCH : JRE_MATCHALL;
+        if (!jv_is_nullish(a0)) {
+            int plain = re_plain(vm, a0);
+            if (which == JRE_SP_MATCHALL) {
+                int g = 1;
+                if (plain) g = (vm->regexes[vm->objs[jv_idx(a0)].a].flags & RF_G) != 0;
+                else {
+                    int isre = js_is_regexp(vm, a0);
+                    if (isre < 0) return JV_HOLE;
+                    if (isre) {
+                        jv fl = js_get(vm, a0, js_atom_ascii(vm, "flags"));
+                        if (vm->throwing) return JV_HOLE;
+                        if (jv_is_nullish(fl))
+                            return js_throw_msg(vm, vm->type_error_proto, "The .flags property of the argument to String.prototype.matchAll cannot be null or undefined");
+                        uint32_t fs = js_to_string(vm, fl);
+                        if (!fs) return JV_HOLE;
+                        g = re_has_flag(vm, fs, 'g');
+                    }
+                }
+                if (!g) return js_throw_msg(vm, vm->type_error_proto, "String.prototype.matchAll called with a non-global RegExp argument");
+            }
+            if (plain) {
+                uint32_t s = js_to_string(vm, thisv);
+                if (!s) return JV_HOLE;
+                return re_method(vm, mw, a0, s, 1);
+            }
+            jv f = re_get_method(vm, a0, sym, which != JRE_SP_MATCHALL);
+            if (f == JV_HOLE) return JV_HOLE;
+            if (f != JV_UNDEF) {
+                jv av[1] = { thisv };
+                return js_call(vm, f, a0, av, 1);
+            }
         }
-        if (!re) return JV_HOLE;
-        jv made;
-        if (!re_species(vm, rxv, &made)) return JV_HOLE;
-        /* the regex copied (the species' matcher when it made one), its lastIndex kept: the original's is not moved */
-        jv li = js_get(vm, rxv, A_LASTINDEX);
-        if (vm->throwing) return JV_HOLE;
-        jv copy = made != JV_UNDEF ? made : re_object(vm, re, vm->regexp_proto);
-        js_set(vm, copy, A_LASTINDEX, jv_num(re_to_length(vm, li)));
-        jv all = re_all_results(vm, copy, re, s);
-        if (vm->throwing) return JV_HOLE;
-        uint32_t it = js_obj_new(vm, JK_ITER, vm->regexp_iter_proto);
-        vm->objs[it].a = jv_idx(all);
-        vm->objs[it].c = JI_REGEXP;
-        return jv_obj(it);
-    }
-    case JRE_REPLACE: case JRE_SP_REPLACE: case JRE_SP_REPLACEALL: {
-        jv rxv = thisv;
-        uint32_t s, re;
-        jv rep = a1;
-        if (which == JRE_REPLACE) {
-            re = re_this(vm, thisv, "RegExp.prototype.@@replace");
-            if (!re) return JV_HOLE;
-            s = js_to_string(vm, a0);
-            if (!s) return JV_HOLE;
-        } else {
-            s = js_to_string(vm, thisv);
-            if (!s) return JV_HOLE;
-            rxv = a0;
-            re = vm->objs[jv_idx(a0)].a;
-            if (which == JRE_SP_REPLACEALL && !(vm->regexes[re].flags & RF_G))
-                return js_throw_msg(vm, vm->type_error_proto, "replaceAll must be called with a global RegExp");
-        }
-        return re_replace(vm, rxv, re, s, rep);
-    }
-    case JRE_SEARCH: case JRE_SP_SEARCH: {
-        jv rxv = thisv;
-        uint32_t s, re;
-        if (which == JRE_SP_SEARCH) {
-            if (jv_is_nullish(thisv)) return js_throw_msg(vm, vm->type_error_proto, "String.prototype.search called on null or undefined");
-            s = js_to_string(vm, thisv);
-            if (!s) return JV_HOLE;
-            re = re_of_value(vm, a0, 0, &rxv);
-        } else {
-            re = re_this(vm, thisv, "RegExp.prototype.@@search");
-            if (!re) return JV_HOLE;
-            s = js_to_string(vm, a0);
-            if (!s) return JV_HOLE;
-        }
-        if (!re) return JV_HOLE;
-        /* lastIndex set to 0 for the search, then put back, each write only when the
-           value differs (a frozen regex searches when its lastIndex is 0 and not g or y) */
-        jv prev = js_get(vm, rxv, A_LASTINDEX);
-        if (vm->throwing) return JV_HOLE;
-        if (!re_same(vm, prev, jv_num(0)) && !re_set_last(vm, rxv, jv_num(0))) return JV_HOLE;
-        int rc = re_builtin_exec(vm, rxv, re, s);
-        if (rc < 0) return JV_HOLE;
-        double at = rc ? (double)vm->re_caps[0] : -1.0;
-        jv cur = js_get(vm, rxv, A_LASTINDEX);
-        if (vm->throwing) return JV_HOLE;
-        if (!re_same(vm, cur, prev) && !re_set_last(vm, rxv, prev)) return JV_HOLE;
-        return jv_num(at);
-    }
-    case JRE_SPLIT: case JRE_SP_SPLIT: {
-        uint32_t s, re;
-        jv lim = a1;
-        if (which == JRE_SPLIT) {
-            re = re_this(vm, thisv, "RegExp.prototype.@@split");
-            if (!re) return JV_HOLE;
-            s = js_to_string(vm, a0);
-            if (!s) return JV_HOLE;
-        } else {
-            s = js_to_string(vm, thisv);
-            if (!s) return JV_HOLE;
-            re = vm->objs[jv_idx(a0)].a;
-        }
-        jv made;
-        if (!re_species(vm, which == JRE_SPLIT ? thisv : a0, &made)) return JV_HOLE;
-        return re_split(vm, re, s, lim);
+        uint32_t s = js_to_string(vm, thisv);
+        if (!s) return JV_HOLE;
+        jv rx = re_create(vm, a0, which == JRE_SP_MATCHALL ? RF_G : 0);
+        if (rx == JV_HOLE) return JV_HOLE;
+        return re_invoke(vm, rx, sym, mw, s);
     }
     default: return JV_UNDEF;
     }
@@ -3006,6 +3479,8 @@ jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, u
 void js_re_init(js_vm *vm, uint32_t first) {
     uint32_t rp = vm->regexp_proto;
     uint32_t c = js_native_new(vm, first + JRE_CTOR, js_atom_ascii(vm, "RegExp"), 2);
+    vm->re_first = first;
+    vm->regexp_ctor = c;
     js_define(vm, c, A_PROTOTYPE, jv_obj(rp), JS_SHAPE_PROTO);
     js_define(vm, rp, A_CONSTRUCTOR, jv_obj(c), JS_SHAPE_HIDDEN);
     js_define(vm, vm->global, js_atom_ascii(vm, "RegExp"), jv_obj(c), JS_SHAPE_HIDDEN);

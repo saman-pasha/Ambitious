@@ -112,7 +112,7 @@ enum { JI_KEYS, JI_ARRAY, JI_STRING, JI_MAP, JI_SET, JI_MAP_KEYS, JI_MAP_VALUES,
        JI_ASYNC, JI_FROM_SYNC,
        JI_ARRAY_KEYS, JI_ARRAY_ENTRIES,  /* an array's (an array-like's) keys and [key, value] pairs, read at each step */
        JI_SET_ENTRIES,                   /* a Set's [value, value] pairs */
-       JI_REGEXP,                        /* matchAll's matches (an array of them in a) */
+       JI_REGEXP,                        /* matchAll's matches: its matcher in a, the string in x (src/js/regexp.c) */
        JI_HELPER };                      /* an Iterator Helper (map, filter, take, drop, flatMap): its record in a */
 /* a generator's (an async run's) state; an async generator's also suspended at an await
    (executing, to its requests), and awaiting a return's value once done */
@@ -432,6 +432,15 @@ typedef struct js_vm {
     uint32_t intl_protos[16];         /* each Intl constructor's prototype, by its kind (src/js/intl.c) */
     uint32_t intl_cache;              /* the formatters toLocaleString made for its defaults (an array, 0 none yet) */
     uint32_t proxy_first;             /* Proxy's first native id (src/js/proxy.c) */
+    uint32_t re_first;                /* RegExp's first native id, and %RegExp% (src/js/regexp.c) */
+    uint32_t regexp_ctor;
+    /* the regexp protector (src/js/regexp.c, re_plain): RegExp.prototype's, RegExp's and a plain RegExp's shapes as the
+       engine made them, and for each property the methods read (exec first), its holder, its slot, the value the
+       engine put there and, for an accessor, its getter (JV_HOLE for none): roots of the collector, so that no other
+       object takes their numbers */
+    uint32_t re_proto_shape, re_ctor_shape, re_root_shape, re_guard_n;
+    uint32_t re_guard_obj[20], re_guard_slot[20];
+    jv re_guard_val[20], re_guard_get[20];
     uint32_t jobs_head;               /* the next microtask to run */
     uint32_t error_ctor, type_error_ctor, range_error_ctor, syntax_error_ctor, reference_error_ctor, eval_error_proto;
     uint32_t throw_te;                /* %ThrowTypeError%: an unmapped arguments object's callee, both its get and its set */
@@ -581,6 +590,12 @@ int js_re_check(js_vm *vm, uint32_t src, uint32_t flags_str, uint32_t *re, vecto
 jv js_re_object(js_vm *vm, uint32_t re);
 int js_re_exec(js_vm *vm, uint32_t re, uint32_t s, uint32_t start);
 jv js_re_native(js_vm *vm, uint32_t which, jv callee, jv thisv, uint32_t args, uint32_t argc, jv newt);
+void js_re_guard(js_vm *vm);                                          /* the regexp protector, once every built-in is made */
+int js_re_iter_step(js_vm *vm, uint32_t it, jv *out);                 /* a matchAll iterator's next match */
+int js_is_regexp(js_vm *vm, jv v);                                    /* IsRegExp: 1, 0; -1 thrown */
+/* String.prototype.replace (all: replaceAll) and split (sym JSYM_REPLACE, JSYM_SPLIT) by the pattern's own Symbol
+   method: 1 done (*out), 0 none, -1 thrown */
+int js_re_string_method(js_vm *vm, uint32_t sym, int all, jv thisv, jv a0, jv a1, jv *out);
 void js_re_init(js_vm *vm, uint32_t first);
 /* HTML's pattern attribute: whether a value matches a pattern, compiled as ^(?:pattern)$ with
    the v flag in a machine of its own: 1 it does, 0 it does not, -1 no regular expression */

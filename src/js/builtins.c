@@ -371,6 +371,17 @@ static void replacement(js_vm *vm, uint32_t rep, uint32_t s, uint32_t pos, uint3
     }
 }
 
+/* includes', startsWith's and endsWith's refusal of a pattern (IsRegExp): 1 none, 0 thrown in V8's words */
+static int str_not_regexp(js_vm *vm, jv v, const char *method) {
+    int r = js_is_regexp(vm, v);
+    if (r < 0) return 0;
+    if (!r) return 1;
+    char m[128];
+    snprintf(m, sizeof m, "First argument to String.prototype.%s must not be a regular expression", method);
+    js_throw_msg(vm, vm->type_error_proto, m);
+    return 0;
+}
+
 static jv str_replace(js_vm *vm, uint32_t s, jv pat, jv rep, int all) {
     uint32_t p = js_to_string(vm, pat);
     if (!p) return JV_HOLE;
@@ -4218,10 +4229,14 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     if (id == N_SP_MATCH) return js_re_native(vm, JRE_SP_MATCH, callee, thisv, args, argc, newt);
     if (id == N_SP_SEARCH) return js_re_native(vm, JRE_SP_SEARCH, callee, thisv, args, argc, newt);
     if (id == N_SP_MATCHALL) return js_re_native(vm, JRE_SP_MATCHALL, callee, thisv, args, argc, newt);
-    if ((id == N_SP_SPLIT || id == N_SP_REPLACE || id == N_SP_REPLACEALL) && jv_is_obj(a0) && vm->objs[jv_idx(a0)].kind == JK_REGEXP) {
-        if (jv_is_nullish(thisv)) return called_on_nothing(vm, "String.prototype.", callee);
-        uint32_t which = id == N_SP_SPLIT ? JRE_SP_SPLIT : id == N_SP_REPLACE ? JRE_SP_REPLACE : JRE_SP_REPLACEALL;
-        return js_re_native(vm, which, callee, thisv, args, argc, newt);
+    /* split, replace and replaceAll: the pattern's own Symbol.split (Symbol.replace) when it has one, a RegExp's or any
+       object's (src/js/regexp.c), before this is read as a string */
+    if ((id == N_SP_SPLIT || id == N_SP_REPLACE || id == N_SP_REPLACEALL) && !jv_is_nullish(a0)) {
+        if (jv_is_nullish(thisv) || thisv == JV_HOLE) return called_on_nothing(vm, "String.prototype.", callee);
+        jv out = JV_UNDEF;
+        int r = js_re_string_method(vm, id == N_SP_SPLIT ? JSYM_SPLIT : JSYM_REPLACE, id == N_SP_REPLACEALL, thisv, a0, a1, &out);
+        if (r < 0) return JV_HOLE;
+        if (r > 0) return out;
     }
     if (id >= N_SP_CHARAT && id <= N_SP_SEARCH) {
         if (jv_is_nullish(thisv) || thisv == JV_HOLE) return called_on_nothing(vm, "String.prototype.", callee);
@@ -4243,6 +4258,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
             return jv_num(c);
         }
         case N_SP_INDEXOF: case N_SP_INCLUDES: {
+            if (id == N_SP_INCLUDES && !str_not_regexp(vm, a0, "includes")) return JV_HOLE;
             uint32_t t = js_to_string(vm, a0);
             if (!t) return JV_HOLE;
             uint32_t from = rel_index(int_arg(vm, args, argc, 1, 0), n);
@@ -4258,6 +4274,7 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
             return jv_num((double)str_last_index_of(vm, s, t, from));
         }
         case N_SP_STARTSWITH: case N_SP_ENDSWITH: {
+            if (!str_not_regexp(vm, a0, id == N_SP_STARTSWITH ? "startsWith" : "endsWith")) return JV_HOLE;
             uint32_t t = js_to_string(vm, a0);
             if (!t) return JV_HOLE;
             uint32_t m = vm->strs[t].len;
@@ -4319,12 +4336,18 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
             return jv_str(str_repeat(vm, s, (uint32_t)c));
         }
         case N_SP_SPLIT: {
+            /* the limit ToUint32 (-1 is every piece), then the separator's text, then a limit of 0 */
             uint32_t out = js_array_new(vm, 0);
-            double lim = a1 == JV_UNDEF ? 4294967295.0 : js_to_number(vm, a1);
+            double lim = 4294967295.0;
+            if (a1 != JV_UNDEF) {
+                double d = js_to_number(vm, a1);
+                if (vm->throwing) return JV_HOLE;
+                lim = (double)(uint32_t)js_to_int32(d);
+            }
+            uint32_t sep = a0 == JV_UNDEF ? 0 : js_to_string(vm, a0);
+            if (a0 != JV_UNDEF && !sep) return JV_HOLE;
             if (lim == 0) return jv_obj(out);
             if (a0 == JV_UNDEF) { js_array_push(vm, out, jv_str(s)); return jv_obj(out); }
-            uint32_t sep = js_to_string(vm, a0);
-            if (!sep) return JV_HOLE;
             uint32_t m = vm->strs[sep].len;
             if (m == 0) {
                 for (uint32_t i = 0; i < n && vm->objs[out].b < lim; i++) js_array_push(vm, out, jv_str(js_str_sub(vm, s, i, i + 1)));
@@ -5520,4 +5543,6 @@ void js_builtins_init(js_vm *vm) {
             vm->pr_root_shape = js_shape_of(vm, pp2);
         }
     }
+    /* and the regexp protector's */
+    js_re_guard(vm);
 }

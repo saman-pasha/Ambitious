@@ -2267,7 +2267,8 @@ int js_iter_step(js_vm *vm, uint32_t it, jv *out) {
         vm->objs[it].b = 0;
         return 1;
     }
-    if (mode == JI_KEYS || mode == JI_ARRAY || mode == JI_ARRAY_KEYS || mode == JI_ARRAY_ENTRIES || mode == JI_REGEXP) {
+    if (mode == JI_REGEXP) return js_re_iter_step(vm, it, out);
+    if (mode == JI_KEYS || mode == JI_ARRAY || mode == JI_ARRAY_KEYS || mode == JI_ARRAY_ENTRIES) {
         /* past the end once, done for good (the array may grow after) */
         if (i == 0xFFFFFFFFu) return 0;
         uint32_t n;

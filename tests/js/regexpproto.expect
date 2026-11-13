@@ -1,0 +1,180 @@
+exec 0 "abc"
+true
+exec 0 "abcb"
+["b"]
+exec 0 "abcb"
+exec 2 "abcb"
+exec 4 "abcb"
+["b","b"]
+exec 0 "abcb"
+aXcb
+exec 0 "abcb"
+exec 2 "abcb"
+exec 4 "abcb"
+aXcX
+exec 0 "abcb"
+exec 2 "abcb"
+exec 4 "abcb"
+a[b]c[b]
+exec 0 "abcb"
+2
+exec 0 "a-b"
+exec 1 "a-b"
+exec 2 "a-b"
+a|b
+exec 0 "a1b2c3"
+exec 1 "a1b2c3"
+exec 2 "a1b2c3"
+exec 3 "a1b2c3"
+["a","1","b","2"]
+exec 0 ""
+[""]
+exec 0 "xyz"
+exec 1 "xyz"
+exec 1 "xyz"
+exec 2 "xyz"
+["x","y"]
+made
+exec 0 "a1b2"
+got 1 1
+exec 2 "a1b2"
+got 2 3
+exec 4 "a1b2"
+a<c1|named|zz|a|def|$|$2|$0>def
+a["zz","c1",1,"abcdef",{"n":"named"}]def
+["zz","zz"]
+TypeError: RegExp exec method returned something other than an Object or null
+TypeError: RegExp exec method returned something other than an Object or null
+TypeError: RegExp exec method returned something other than an Object or null
+true
+x_x
+own exec 0
+own exec 1
+own exec 3
+_a_
+fake exec zz
+false
+fake exec zz
+null
+fake exec zz
+-1
+fake exec zz
+zz
+test => true
+   get exec, exec
+match => {"0":"x","index":1,"length":1}
+   global, get exec, exec
+match global => ["x","x"]
+   global, unicode, unicodeSets, set lastIndex 0, get exec, exec, get exec, exec, get exec, exec
+match flags g, global false => {"0":"x","index":1,"length":1}
+   global, get exec, exec
+match global, empty => ["",""]
+   global, unicode, set lastIndex 0, get exec, exec, get lastIndex, set lastIndex 1, get exec, exec, get lastIndex, set lastIndex 2, get exec, exec
+replace => "a__"
+   global, unicode, set lastIndex 0, get exec, exec, get exec, exec, get exec, exec
+replace flags g, global false => "a_c"
+   global, get exec, exec
+search => 1
+   get lastIndex, get exec, exec, get lastIndex
+split => ["a","",""]
+   get constructor, flags
+matchAll => 2
+   get constructor, flags, get lastIndex
+m:abc
+r:abc1
+s:abc
+p:abc2
+TypeError: String.prototype.replaceAll called on null or undefined
+TypeError: The .flags property of the argument to String.prototype.matchAll cannot be null or undefined
+a:abc
+ra:abc3
+number:12345
+["sub","abc"]
+subrep
+subrep
+["own split","abc"]
+{"0":"zz","index":0,"length":1}
+_c
+0
+.
+abc
+1
+a-b
+a|b
+TypeError: '5' returned for property 'Symbol(Symbol.match)' of object '#<Object>' is not a function
+TypeError: string "x" is not a function
+TypeError: '#<Object>' returned for property 'Symbol(Symbol.search)' of object '#<Object>' is not a function
+TypeError: boolean true is not a function
+TypeError: number 1 is not a function
+TypeError: '2' returned for property 'Symbol(Symbol.replace)' of object '#<Object>' is not a function
+TypeError: First argument to String.prototype.startsWith must not be a regular expression
+TypeError: First argument to String.prototype.endsWith must not be a regular expression
+TypeError: First argument to String.prototype.includes must not be a regular expression
+TypeError: First argument to String.prototype.includes must not be a regular expression
+true
+true
+true
+TypeError: String.prototype.matchAll called with a non-global RegExp argument
+2
+ok
+TypeError: String.prototype.replaceAll called on null or undefined
+TypeError: String.prototype.matchAll called with a non-global RegExp argument
+TypeError: The .flags property of the argument to String.prototype.matchAll cannot be null or undefined
+a-b-
+TypeError: String.prototype.replaceAll called with a non-global RegExp argument
+S ctor b g
+S ctor /b/g g
+1,3
+S ctor - undefined
+S ctor /-/ y
+a|b
+species - y
+a|c
+["abc"]
+TypeError: The .constructor property is not an object
+TypeError: object.constructor[Symbol.species] is not a constructor
+threw boom
+{"value":{"0":"a","index":2,"length":1},"done":false} 2
+1 3
+0 true true
+[object RegExp String Iterator] function
+1
+22,333
+2,3 2
+0,1,3,4
+0,1,2,3,4
+/ab/g
+/ab/i
+true
+false
+false
+true
+/q/g
+3
+3
+1
+2
+0
+patched exec q
+true
+patched exec q
+patched exec q
+patched exec q
+a!a!
+patched exec q
+patched exec q
+patched exec q
+patched exec q
+a|a|
+a?a?
+global read
+a#a#
+global read
+g
+a%a%
+{"value":0,"writable":true,"enumerable":false,"configurable":false}
+false
+TypeError: Cannot redefine property: lastIndex
+TypeError: Cannot delete property 'lastIndex' of [object RegExp]
+TypeError: Cannot assign to read only property 'lastIndex' of object '[object RegExp]'
+[true,"-x"]
