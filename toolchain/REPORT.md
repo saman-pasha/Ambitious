@@ -752,3 +752,33 @@ neighbours.
     with `vector<int> anon;` (and `#include <vector.pl>`) the same, at the function. Asked for:
     a name the language does not reserve kept apart from the tree's marker (a marker no
     identifier can spell), or the name refused as a reserved one, at the name.
+
+41. **Under an address-space limit, cocolog's `--embed` store opens an existing store as
+    empty, and its next write loses what was there**: with `ulimit -v 4000000` (4 GB),
+    a store written without the limit is read back with none of its clauses, and no
+    error or warning is printed (the query fails with "Unknown procedure"). A write made
+    in that state is committed over the old store: afterwards, without the limit, neither
+    the old clauses nor the new one are there. Reads come right from about 6,000,000 KB
+    up. Each mapped store file reserves 1 GiB of address space when it is opened
+    (`StreamIO/mapbuf.cpp`, `mapbuf::RESERVE`), so the limit is met when the store is
+    opened. The open of the hexmap and data files throws when it fails
+    (`loadmemory.cpp`), so it is not those two; `ZIGURATIP_PARALLEL_READS=0` doesn't
+    change it either. The browser's profile (history, sessions, preferences) is such a
+    store: `make test` run under `ulimit -v 4000000` showed the integ stage's
+    preference, profile and tab tests RED, the stored preferences read back as the
+    defaults. Repro:
+
+    ```sh
+    rm -rf /tmp/s
+    cocolog --embed /tmp/s query "assertz(foo(1))"             # 1 answer
+    (ulimit -v 4000000; cocolog --embed /tmp/s query "foo(X)")   # Unknown procedure: foo/1
+    (ulimit -v 4000000; cocolog --embed /tmp/s query "assertz(bar(2))")
+    cocolog --embed /tmp/s query "foo(X)"                        # Unknown procedure: foo/1
+    cocolog --embed /tmp/s query "bar(X)"                        # Unknown procedure: bar/1
+    ```
+
+    Asked for: a store that cannot be mapped refused at open with the reason (and the
+    process's exit non-zero), never read as empty and never written over; and a
+    reservation that fits a limited address space (the limit read with `getrlimit`, or
+    the mapping grown as the store grows). Until then the browser's tests must not run
+    under an address-space limit: `make test` is run without `ulimit -v`.

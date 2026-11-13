@@ -624,6 +624,13 @@ int js_pattern_test(const char *p, size_t pn, const char *v, size_t vn);
    target's own; Proxy's, Reflect's and the weak collections' natives, after the first's id */
 jv js_proxy_get(js_vm *vm, uint32_t p, uint32_t key, jv receiver);
 int js_proxy_set(js_vm *vm, uint32_t p, uint32_t key, jv v, jv receiver);
+/* CopyDataProperties (spread, rest) and Object.assign's loop (set: [[Set]], a refusal a TypeError; else defined):
+   so's own enumerable keys, strings then symbols, each read and put on target; 0 when it threw */
+int js_copy_own(js_vm *vm, uint32_t target, uint32_t so, int set);
+/* super's [[Set]]: o's (the home object's prototype's), the receiver this; a failure in strict code V8's TypeError */
+int js_super_set(js_vm *vm, uint32_t o, uint32_t key, jv v, jv receiver, int strict);
+/* strict code's assignment refused: V8's TypeError naming the property (vm->refused the reason, when it is known) */
+void js_set_refused(js_vm *vm, jv obj, uint32_t key);
 int js_proxy_has(js_vm *vm, uint32_t p, uint32_t key);
 int js_proxy_delete(js_vm *vm, uint32_t p, uint32_t key);
 int js_proxy_get_own(js_vm *vm, uint32_t p, uint32_t key, jv *v, uint32_t *flags);
@@ -916,8 +923,9 @@ enum {
     OP_RUN_STATIC,                                /* c fn -> c: fn called with c its this and its home object (a class's static
                                                      initializer, a static block) */
     OP_DEF_ELEM,                                  /* obj key v -> obj */
-    OP_DEF_GET, OP_DEF_SET,                       /* u32 atom: obj fn -> obj */
-    OP_DEF_GET_ELEM, OP_DEF_SET_ELEM,             /* obj key fn -> obj */
+    OP_DEF_GET, OP_DEF_SET,                       /* u8 class, u32 atom: obj fn -> obj (a class's accessor, class 1,
+                                                     not enumerable; an object literal's enumerable) */
+    OP_DEF_GET_ELEM, OP_DEF_SET_ELEM,             /* u8 class: obj key fn -> obj */
     OP_DEF_METHOD,                                /* u32 atom: obj fn -> obj; the method's home is obj, it is not enumerable */
     OP_DEF_METHOD_ELEM,                           /* obj key fn -> obj */
     OP_COPY_PROPS,                                /* obj src -> obj */
@@ -1036,6 +1044,9 @@ enum {
     OP_ARGUMENTS_MAPPED,                          /* u16 n, n u16 cells: -> a sloppy function's arguments object, its
                                                      element i its parameter i's cell of the function's environment
                                                      (0xFFFF: none), while i is less than its count of arguments */
+    OP_PUT_SUPER,                                 /* u32 atom: v -> v, set on the home object's prototype, this the receiver */
+    OP_PUT_SUPER_ELEM,                            /* k v -> v (k converted after v was evaluated, V8's order) */
+    OP_DELETE_SUPER,                              /* -> V8's ReferenceError: delete super.x */
     OP_NOP,
     OP_NOPS
 };

@@ -1,0 +1,32 @@
+true                         if t while2 do3 for1 false true true string boolean false true false 1 true true
+false                        else f while0 do1 for0 true false false boolean string true false false 0 false false
+0                            else f while0 do1 for0 true false false number string true false false 0 false false
+0                            else f while0 do1 for0 true false false number string true false false 0 false false
+1                            if t while2 do3 for1 false true true string number false true false 1 true true
+-1                           if t while2 do3 for1 false true true string number false true false 1 true true
+0.5                          if t while2 do3 for1 false true true string number false true false 1 true true
+NaN                          else f while0 do1 for0 true false false number string true false false 0 false false
+Infinity                     if t while2 do3 for1 false true true string number false true false 1 true true
+-Infinity                    if t while2 do3 for1 false true true string number false true false 1 true true
+""                           else f while0 do1 for0 true false false string string true false false 0 false false
+"a"                          if t while2 do3 for1 false true true string string false true false 1 true true
+"0"                          if t while2 do3 for1 false true true string string false true false 1 true true
+" "                          if t while2 do3 for1 false true true string string false true false 1 true true
+null                         else f while0 do1 for0 true false false object string true false true 0 false false
+undefined                    else f while0 do1 for0 true false false undefined string true false true 0 false false
+0n                           else f while0 do1 for0 true false false bigint string true false false 0 false false
+1n                           if t while2 do3 for1 false true true string bigint false true false 1 true true
+-1n                          if t while2 do3 for1 false true true string bigint false true false 1 true true
+1180591620717411303424n      if t while2 do3 for1 false true true string bigint false true false 1 true true
+symbol Symbol()              if t while2 do3 for1 false true true string symbol false true false 1 true true
+symbol Symbol(s)             if t while2 do3 for1 false true true string symbol false true false 1 true true
+symbol Symbol(Symbol.iterator) if t while2 do3 for1 false true true string symbol false true false 1 true true
+object [object Object]       if t while2 do3 for1 false true true string object false true false 1 true true
+object [object Array]        if t while2 do3 for1 false true true string object false true false 1 true true
+object [object Array]        if t while2 do3 for1 false true true string object false true false 1 true true
+function                     if t while2 do3 for1 false true true string function false true false 1 true true
+object [object Boolean]      if t while2 do3 for1 false true true string object false true false 1 true true
+object [object BigInt]       if t while2 do3 for1 false true true string object false true false 1 true true
+object [object Symbol]       if t while2 do3 for1 false true true string object false true false 1 true true
+bigint loop 5
+keys tested 2

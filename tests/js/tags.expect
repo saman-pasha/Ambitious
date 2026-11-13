@@ -1,0 +1,4 @@
+[object Boolean] [object Number] [object String] [object BigInt] [object Symbol] [object Date] [object RegExp] [object Array] [object Function] [object Error] [object Null] [object Undefined] [object Number] [object String] [object Boolean] [object Map] [object Set] [object Promise] [object ArrayBuffer] [object Uint8Array] [object JSON] [object Math] [object Arguments] [object Array] [object Object] [object Object] [object Intl]
+{"value":"Math","writable":false,"enumerable":false,"configurable":true} Symbol(Symbol.toStringTag)
+{"value":"JSON","writable":false,"enumerable":false,"configurable":true} Symbol(Symbol.toStringTag)
+[object Custom] [object Tagged] 5 s

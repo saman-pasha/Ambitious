@@ -1,0 +1,29 @@
+plain ["own",true,"proto plain"]
+new [1,true,false]
+accessor Base set acc 5 on Derived
+computed computed ck computed Symbol(s) computed 3 true
+compound NaN
+logical a,1,c
+update NaN,NaN,NaN,NaN
+value 42,42
+chained 7,7
+readonly TypeError: Cannot assign to read only property 'ro' of object '#<Derived>'
+getter only TypeError: Cannot set property only of #<Base> which has only a getter
+destructure x,dflt,P,{"q":1,"r":2}
+loops a,b,k1,k2
+arrow arrow
+delete ReferenceError: Unsupported reference to 'super'
+key order expr,rhs,key 1
+static static,true,false
+literal proto setter v,1,3
+strict literal Cannot assign to read only property 'frozen' of object '#<Object>'
+not extensible Cannot add property z, object is not extensible
+proxy set t 9 true
+null proto no error true
+r TypeError: Cannot read properties of null (reading 'x')
+w TypeError: Cannot set properties of null (setting 'x')
+r TypeError: Cannot read properties of null (reading 'y')
+w TypeError: Cannot set properties of null (setting 'y')
+prim TypeError: Cannot assign to read only property 'z' of number '5'
+prim sloppy object
+10 Unsupported reference to 'super'

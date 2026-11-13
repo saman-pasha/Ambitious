@@ -1862,7 +1862,7 @@ int js_set_ic(js_vm *vm, jv objv, uint32_t atom, jv v, uint32_t ic) {
 int js_set(js_vm *vm, jv obj, uint32_t atom, jv v) { return js_set_ic(vm, obj, atom, v, 0); }
 
 /* strict code's assignment the object refused: a TypeError naming the property */
-static void js_set_refused(js_vm *vm, jv obj, uint32_t key) {
+void js_set_refused(js_vm *vm, jv obj, uint32_t key) {
     uint32_t name = js_key_name(vm, key), m;
     if (!jv_is_obj(obj)) {
         /* V8's words: the primitive's type and its text */
@@ -1881,20 +1881,27 @@ static void js_set_refused(js_vm *vm, jv obj, uint32_t key) {
     uint32_t o = jv_idx(obj), why = vm->refused;
     if (why) { key = vm->refused_key; name = js_key_name(vm, key); }
     vm->refused = JSR_NONE;
+    jv named = obj;
     if (!why) {
-        /* the nearest holder of the key says: only a getter, read-only (its own attribute,
-           or the holder frozen); a frozen or non-extensible object's new property else */
+        /* the nearest holder of the key says: only a getter (the holder named, as V8 names it), read-only (its own
+           attribute, or the holder frozen); a frozen or non-extensible object's new property else */
         why = JSR_NOT_EXTENSIBLE;
         for (uint32_t p = o, depth = 0; p && depth < 10000; p = vm->objs[p].proto, depth++) {
             uint32_t e = js_shape_find(vm, vm->objs[p].shape, key);
             if (!e || vm->slots[vm->objs[p].slots + vm->shapes[e].slot] == JV_HOLE) continue;
-            if (vm->shapes[e].flags & JS_SHAPE_ACCESSOR) why = JSR_GETTER;
+            if (vm->shapes[e].flags & JS_SHAPE_ACCESSOR) { why = JSR_GETTER; named = jv_obj(p); }
             else if ((vm->shapes[e].flags & JS_SHAPE_READONLY) || (vm->objs[p].flags & JO_FROZEN)) why = JSR_READONLY;
             break;
         }
-    }
+    } else if (why == JSR_GETTER)
+        for (uint32_t p = o, depth = 0; p && depth < 10000; p = vm->objs[p].proto, depth++) {
+            uint32_t e = js_shape_find(vm, vm->objs[p].shape, key);
+            if (!e || vm->slots[vm->objs[p].slots + vm->shapes[e].slot] == JV_HOLE) continue;
+            if (vm->shapes[e].flags & JS_SHAPE_ACCESSOR) named = jv_obj(p);
+            break;
+        }
     vector<char> t;
-    js_value_text(vm, obj, &t);
+    js_value_text(vm, named, &t);
     uint32_t of = js_str_utf8(vm, data(t), len(t));
     if (why == JSR_READONLY || why == JSR_LENGTH)
         m = js_str_concat(vm, js_str_ascii(vm, "Cannot assign to read only property '"),
@@ -2352,38 +2359,54 @@ static uint32_t js_iter_new(js_vm *vm, uint32_t source, uint32_t mode) {
     return it;
 }
 
-/* for-in's keys: the enumerable string keys of the object and its prototypes, each once */
+/* string s put in a set of strings (open addressing, each one's index plus one; n held): 1 when it was there */
+static int js_strset_put(js_vm *vm, vector<uint32_t> *set, size_t *n, uint32_t s) {
+    if ((*n + 1) * 2 > len(*set)) {
+        size_t cap = len(*set) ? len(*set) * 2 : 64;
+        vector<uint32_t> old;
+        for (size_t i = 0; i < len(*set); i++) if ((*set)[i]) push_back(old, (*set)[i]);
+        clear(*set);
+        resize(*set, cap, 0);
+        for (size_t i = 0; i < len(old); i++) {
+            size_t j = js_str_hash(vm, old[i] - 1) & (cap - 1);
+            while ((*set)[j]) j = (j + 1) & (cap - 1);
+            (*set)[j] = old[i];
+        }
+    }
+    size_t m = len(*set) - 1, j = js_str_hash(vm, s) & m;
+    for (; (*set)[j]; j = (j + 1) & m) if (js_str_eq(vm, (*set)[j] - 1, s)) return 1;
+    (*set)[j] = s + 1;
+    (*n)++;
+    return 0;
+}
+
+/* for-in's keys: the enumerable string keys of the object and its prototypes, each once, a key of an object nearer
+   (enumerable or not) hiding a prototype's of its name (ECMA-262's EnumerateObjectProperties, V8's): the keys not
+   enumerable of the objects below a prototype looked at only when it has keys to enumerate (a proxy's not, whose
+   traps would be called again) */
 static uint32_t js_iter_keys(js_vm *vm, jv v) {
     uint32_t keys = js_array_new(vm, 0);
     if (jv_is_obj(v) || jv_is_str(v)) {
         jv ov = js_to_object(vm, v);
-        uint32_t all = js_array_new(vm, 0);
-        /* the keys taken, by their strings' hashes: each one's place in keys plus one, open addressing */
+        uint32_t all = js_array_new(vm, 0), hidden = js_array_new(vm, 0);
         vector<uint32_t> seen;
-        resize(seen, 64, 0);
         size_t nseen = 0;
+        uint32_t below = jv_idx(ov);       /* the first object whose keys not enumerable are not yet in seen */
         for (uint32_t x = jv_idx(ov), depth = 0; x && depth < 1000; x = vm->objs[x].proto, depth++) {
             uint32_t from = vm->objs[all].b;
             js_own_keys(vm, x, 1, all);
+            if (depth && vm->objs[all].b > from) {
+                for (uint32_t y = below, yd = 0; y && y != x && yd < 1000; y = vm->objs[y].proto, yd++) {
+                    if (vm->objs[y].kind == JK_PROXY) continue;
+                    uint32_t h0 = vm->objs[hidden].b;
+                    js_own_keys(vm, y, 0, hidden);
+                    for (uint32_t i = h0; i < vm->objs[hidden].b; i++) js_strset_put(vm, &seen, &nseen, jv_idx(js_array_get(vm, hidden, i)));
+                }
+                below = x;
+            }
             for (uint32_t i = from; i < vm->objs[all].b; i++) {
                 jv k = js_array_get(vm, all, i);
-                if ((nseen + 1) * 2 > len(seen)) {
-                    size_t cap = len(seen) * 2;
-                    clear(seen);
-                    resize(seen, cap, 0);
-                    for (uint32_t q = 0; q < vm->objs[keys].b; q++) {
-                        size_t j = js_str_hash(vm, jv_idx(js_array_get(vm, keys, q))) & (cap - 1);
-                        while (seen[j]) j = (j + 1) & (cap - 1);
-                        seen[j] = q + 1;
-                    }
-                }
-                size_t m = len(seen) - 1, j = js_str_hash(vm, jv_idx(k)) & m;
-                int dup = 0;
-                for (; seen[j] && !dup; j = (j + 1) & m) if (js_str_eq(vm, jv_idx(js_array_get(vm, keys, seen[j] - 1)), jv_idx(k))) dup = 1;
-                if (dup) continue;
-                js_array_push(vm, keys, k);
-                seen[j] = vm->objs[keys].b;
-                nseen++;
+                if (!js_strset_put(vm, &seen, &nseen, jv_idx(k))) js_array_push(vm, keys, k);
             }
         }
     }
@@ -3502,6 +3525,9 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
         case OP_DEF_GET: case OP_DEF_SET: case OP_DEF_GET_ELEM: case OP_DEF_SET_ELEM: {
             uint32_t atom;
             jv fn = stack[sp - 1];
+            /* a class's accessor is not enumerable, an object literal's is */
+            uint32_t hidden = code[pc] ? JS_SHAPE_HIDDEN : 0;
+            pc++;
             if (op == OP_DEF_GET || op == OP_DEF_SET) { atom = RD32(pc); pc += 4; sp--; }
             else {
                 SYNC();
@@ -3511,9 +3537,13 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
                 sp -= 2;
             }
             uint32_t o = jv_idx(stack[sp - 1]);
+            /* a class's computed static accessor named prototype: V8's TypeError, as a method's */
+            if (hidden && atom == A_PROTOTYPE && (objs[o].flags & JO_CLASS_CTOR)) {
+                js_throw_msg(vm, vm->type_error_proto, "Classes may not have a static property named 'prototype'"); RELOAD();
+                break;
+            }
             objs[jv_idx(fn)].c = o;
             int get = op == OP_DEF_GET || op == OP_DEF_GET_ELEM;
-            uint32_t hidden = objs[o].kind == JK_PLAIN && objs[o].proto != vm->object_proto ? JS_SHAPE_HIDDEN : 0;
             js_define_accessor(vm, o, atom, get ? fn : JV_HOLE, get ? JV_HOLE : fn, hidden); RELOAD();
             break;
         }
@@ -3523,13 +3553,8 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             if (jv_is_obj(src) || jv_is_str(src)) {
                 SYNC();
                 jv so = js_to_object(vm, src); RELOAD();
-                uint32_t keys = js_array_new(vm, 0); RELOAD();
-                js_own_keys(vm, jv_idx(so), 1, keys); RELOAD();
-                for (uint32_t i = 0; i < objs[keys].b && !vm->throwing; i++) {
-                    uint32_t atom = js_atom(vm, jv_idx(js_array_get(vm, keys, i))); RELOAD();
-                    jv v = js_get(vm, so, atom); RELOAD();
-                    if (!vm->throwing) js_define(vm, o, atom, v, 0); RELOAD();
-                }
+                if (!vm->throwing) js_copy_own(vm, o, jv_idx(so), 0);
+                RELOAD();
             }
             break;
         }
@@ -3714,11 +3739,37 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             uint32_t home = objs[frames[fi].callee].c;
             uint32_t p = home ? objs[home].proto : 0;
             uint32_t h = 0, e = 0;
-            jv v = p ? js_obj_get(vm, p, atom, frames[fi].thisv, &h, &e) : JV_UNDEF; RELOAD();
+            jv v = p ? js_obj_get(vm, p, atom, frames[fi].thisv, &h, &e) : home ? js_get(vm, JV_NULL, atom) : JV_UNDEF; RELOAD();
             if (vm->throwing) break;
             stack[sp++] = v;
             break;
         }
+        case OP_PUT_SUPER: case OP_PUT_SUPER_ELEM: {
+            /* super's [[Set]]: the home object's prototype's, this the receiver; a computed key converted now, after
+               the value; the value left (a null prototype V8's TypeError, as a write to null) */
+            uint32_t atom = 0;
+            SYNC();
+            if (op == OP_PUT_SUPER) { atom = RD32(pc); pc += 4; }
+            else {
+                int kok = 1;
+                atom = js_prop_key(vm, stack[sp - 2], &kok); RELOAD();
+                if (!kok) break;
+            }
+            jv v = stack[sp - 1];
+            uint32_t home = objs[frames[fi].callee].c;
+            uint32_t p = home ? objs[home].proto : 0;
+            int strict = (funcs[frames[fi].func].flags & JF_STRICT) != 0;
+            if (p) js_super_set(vm, p, atom, v, frames[fi].thisv, strict);
+            else js_set(vm, JV_NULL, atom, v);
+            RELOAD();
+            if (vm->throwing) break;
+            if (op == OP_PUT_SUPER_ELEM) { stack[sp - 2] = stack[sp - 1]; sp--; }
+            break;
+        }
+        case OP_DELETE_SUPER:
+            SYNC();
+            js_throw_msg(vm, vm->reference_error_proto, "Unsupported reference to 'super'"); RELOAD();
+            break;
         case OP_CLOSURE: {
             uint32_t func = RD32(pc);
             pc += 4;
@@ -4109,7 +4160,8 @@ jv js_run(js_vm *vm, uint32_t entry_frame) {
             else if (c == JV_FALSE) t = 0;
             else if (jv_is_num(c)) { double d = jv_dbl(c); t = d == d && d != 0; }
             else if (jv_is_str(c)) t = vm->strs[jv_idx(c)].len > 0;
-            else t = jv_is_obj(c);
+            else if (jv_is_big(c)) { t = !js_big_is_zero(vm, c); RELOAD(); }
+            else t = jv_is_obj(c) || jv_is_sym(c);
             if (t == (op == OP_JT)) {
                 int32_t off = (int32_t)RD32(pc);
                 pc = (uint32_t)((int32_t)pc + 4 + off);

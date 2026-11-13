@@ -984,6 +984,127 @@ static int px_ordinary_set(js_vm *vm, uint32_t o, uint32_t key, jv v, jv receive
     return px_define_desc(vm, r, key, &nd) > 0;
 }
 
+/* CopyDataProperties (ECMA-262 7.3.25) and Object.assign's loop: so's own enumerable keys, its strings' then its
+   symbols' (each in the order it has them), each read and put on target, defined (spread, rest) or set (assign: a
+   refusal a TypeError). A proxy's keys are its ownKeys trap's, asked once, each then asked for its descriptor and,
+   enumerable, read, in turn, as V8 asks them */
+int js_copy_own(js_vm *vm, uint32_t target, uint32_t so, int set) {
+    uint32_t keys = js_array_new(vm, 0);
+    int proxy = vm->objs[so].kind == JK_PROXY;
+    if (proxy) js_proxy_own_keys(vm, so, 1, 1, 0, keys);
+    else {
+        js_own_keys(vm, so, 1, keys);
+        if (vm->throwing) return 0;
+        uint32_t syms = js_array_new(vm, 0);
+        js_own_symbols(vm, so, syms);
+        for (uint32_t i = 0; i < vm->objs[syms].b; i++) {
+            jv k = js_array_get(vm, syms, i);
+            uint32_t flags = 0;
+            int live = 0;
+            if (js_shape_entry(vm, so, JS_SYM_KEY | jv_idx(k), &flags, &live) && live && !(flags & JS_SHAPE_HIDDEN)) js_array_push(vm, keys, k);
+        }
+    }
+    if (vm->throwing) return 0;
+    for (uint32_t i = 0; i < vm->objs[keys].b && !vm->throwing; i++) {
+        jv k = js_array_get(vm, keys, i);
+        uint32_t key = px_key_of(vm, k);
+        if (proxy) {
+            px_desc d;
+            int h = px_own(vm, so, key, &d);
+            if (h < 0) return 0;
+            if (!h || !d.enumerable) continue;
+        }
+        jv v = js_get(vm, jv_obj(so), key);
+        if (vm->throwing) return 0;
+        if (set) {
+            if (!js_set_throw(vm, jv_obj(target), k, v)) return 0;
+        } else js_define(vm, target, key, v, 0);
+    }
+    return !vm->throwing;
+}
+
+/* super's assignment refused in strict code: V8's TypeError for why (JSR_*), the object named obj (a primitive
+   receiver's V8 words: its property read-only) */
+static void px_super_refused(js_vm *vm, jv obj, uint32_t key, uint32_t why) {
+    if (!jv_is_obj(obj)) {
+        const char *ty = jv_is_str(obj) ? "' of string '" : jv_is_num(obj) ? "' of number '" : jv_is_big(obj) ? "' of bigint '" :
+                         jv_is_sym(obj) ? "' of symbol '" : "' of boolean '";
+        uint32_t s = jv_is_sym(obj) ? js_sym_text(vm, jv_idx(obj)) : js_to_string(vm, obj);
+        if (vm->throwing) return;
+        uint32_t m = js_str_concat(vm, js_str_ascii(vm, "Cannot assign to read only property '"),
+                                   js_str_concat(vm, js_key_name(vm, key), js_str_concat(vm, js_str_ascii(vm, ty), js_str_concat(vm, s, js_str_ascii(vm, "'")))));
+        js_throw(vm, jv_obj(js_error_new(vm, vm->type_error_proto, m)));
+        return;
+    }
+    vm->refused = why;
+    vm->refused_key = key;
+    js_set_refused(vm, obj, key);
+}
+
+/* super's [[Set]] (a super reference's PutValue): o's, the home object's prototype's, with this the receiver, as
+   px_ordinary_set; a failure in strict code V8's TypeError: an accessor without a setter (its holder named), a
+   property read-only (the receiver named), a new one on an object not extensible, a proxy's trap's false */
+int js_super_set(js_vm *vm, uint32_t o, uint32_t key, jv v, jv receiver, int strict) {
+    for (uint32_t x = o, d = 0; x && d < 10000; d++) {
+        if (vm->objs[x].kind == JK_PROXY) {
+            int r = js_proxy_set(vm, x, key, v, receiver);
+            if (vm->throwing) return 0;
+            if (!r && strict) px_error(vm, "'set' on proxy: trap returned falsish for property '", key, 1, "'", 0, 0, "");
+            return r;
+        }
+        px_desc cur;
+        int h = px_ordinary_own(vm, x, key, &cur);
+        if (h < 0) return 0;
+        if (h) {
+            if (pd_accessor(&cur)) {
+                if (cur.set == JV_UNDEF) {
+                    if (strict) px_super_refused(vm, jv_obj(x), key, JSR_GETTER);
+                    return 0;
+                }
+                jv a1[1] = { v };
+                js_call(vm, cur.set, receiver, a1, 1);
+                return !vm->throwing;
+            }
+            if (!cur.writable) {
+                if (strict) px_super_refused(vm, receiver, key, JSR_READONLY);
+                return 0;
+            }
+            break;
+        }
+        x = vm->objs[x].proto;
+    }
+    if (!jv_is_obj(receiver)) {
+        if (strict) px_super_refused(vm, receiver, key, JSR_READONLY);
+        return 0;
+    }
+    uint32_t r = jv_idx(receiver);
+    px_desc ex;
+    int has = px_own(vm, r, key, &ex);
+    if (has < 0) return 0;
+    px_desc nd;
+    memset(&nd, 0, sizeof nd);
+    nd.get = nd.set = JV_UNDEF;
+    if (has) {
+        if (pd_accessor(&ex) || !ex.writable) {
+            if (strict) px_super_refused(vm, receiver, key, JSR_READONLY);
+            return 0;
+        }
+        nd.has = PD_VALUE;
+        nd.value = v;
+    } else {
+        nd.has = PD_VALUE | PD_WRITABLE | PD_ENUMERABLE | PD_CONFIGURABLE;
+        nd.value = v;
+        nd.writable = nd.enumerable = nd.configurable = 1;
+    }
+    int ok = px_define_desc(vm, r, key, &nd);
+    if (ok < 0 || vm->throwing) return 0;
+    if (!ok && strict) {
+        if (vm->objs[r].kind == JK_PROXY) px_error(vm, "'defineProperty' on proxy: trap returned falsish for property '", key, 1, "'", 0, 0, "");
+        else px_super_refused(vm, receiver, key, has ? JSR_READONLY : JSR_NOT_EXTENSIBLE);
+    }
+    return ok > 0;
+}
+
 /* ---- the natives ---- */
 
 /* a value as a key for Reflect: an atom or a symbol's key; 0 with ok cleared when its conversion threw */

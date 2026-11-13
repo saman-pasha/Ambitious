@@ -1,0 +1,32 @@
+"#!x\n1" eval 1
+"#!x\n1" indirect 1
+"#!x\n1" function SyntaxError: Invalid or unexpected token
+"#!/usr/bin/env node\n\"second line\"" eval "second line"
+"#!/usr/bin/env node\n\"second line\"" indirect "second line"
+"#!/usr/bin/env node\n\"second line\"" function SyntaxError: Invalid or unexpected token
+"#!x" eval undefined
+"#!x" indirect undefined
+"#!x" function SyntaxError: Invalid or unexpected token
+" #!x\n1" eval SyntaxError: Invalid or unexpected token
+" #!x\n1" indirect SyntaxError: Invalid or unexpected token
+" #!x\n1" function SyntaxError: Invalid or unexpected token
+"\n#!x\n1" eval SyntaxError: Invalid or unexpected token
+"\n#!x\n1" indirect SyntaxError: Invalid or unexpected token
+"\n#!x\n1" function SyntaxError: Invalid or unexpected token
+"1\n#!x" eval SyntaxError: Invalid or unexpected token
+"1\n#!x" indirect SyntaxError: Invalid or unexpected token
+"1\n#!x" function SyntaxError: Invalid or unexpected token
+"#x" eval SyntaxError: Private field '#x' must be declared in an enclosing class
+"#x" indirect SyntaxError: Private field '#x' must be declared in an enclosing class
+"#x" function SyntaxError: Private field '#x' must be declared in an enclosing class
+"#" eval SyntaxError: Invalid or unexpected token
+"#" indirect SyntaxError: Invalid or unexpected token
+"#" function SyntaxError: Invalid or unexpected token
+private still true
+"#x" SyntaxError: Private field '#x' must be declared in an enclosing class
+"class A { #x; m() { #x; } }" SyntaxError: Unexpected identifier '#x'
+"class A { #x; m() { return #x + 1; } }" SyntaxError: Unexpected identifier '#x'
+"class A { m() { #y; } }" SyntaxError: Unexpected identifier '#y'
+"#x in {}" SyntaxError: Private field '#x' must be declared in an enclosing class
+"class A { #x; m(o) { return #x in o; } }" ok
+"class A { #x; m(o) { return (#x) in o; } }" SyntaxError: Unexpected identifier '#x'

@@ -1,0 +1,11 @@
+A false/true/function/undefined false/true/undefined/function false/true/function/function false/true/function/undefined false/true/undefined/undefined false/true/undefined/undefined false/true/function/undefined false/true/undefined/function
+B false/true/function/undefined false/true/undefined/function false/true/function/undefined
+C false/true/function/undefined 0 0
+o true/true/function/undefined true/true/undefined/function true/true/undefined/undefined true/true/function/undefined
+p true/true/function/undefined true/true/undefined/function g,s
+a,parent
+walked
+TypeError Classes may not have a static property named 'prototype'
+SyntaxError Classes may not have a static property named 'prototype'
+TypeError Classes may not have a static property named 'prototype'
+false/true/function/undefined

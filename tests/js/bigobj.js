@@ -69,6 +69,11 @@ const seen = [];
 for (const k in child) seen.push(k);
 console.log('forin', seen.length, seen.slice(0, 3).join(','), seen.slice(78, 82).join(','), seen.slice(-2).join(','));
 console.log('forin values', sum(child), child.p0, child.p40, child.p119);
+Object.defineProperty(child, 'p45', { enumerable: false, value: 5 });
+const seen2 = [];
+for (const k in child) seen2.push(k);
+console.log('hidden', seen2.length, seen2.includes('p45'), child.p45, Object.keys(child).length);
+
 // attributes on a big object: read-only, hidden, accessors, frozen, sealed
 const d = {};
 for (let i = 0; i < 64; i++) d['d' + i] = i;

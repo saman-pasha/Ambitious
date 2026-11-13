@@ -3520,15 +3520,9 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
             jv src = arg(vm, args, argc, i);
             if (jv_is_nullish(src)) continue;
             jv so = js_to_object(vm, src);
-            uint32_t keys = js_array_new(vm, 0);
-            js_own_keys(vm, jv_idx(so), 1, keys);
-            for (uint32_t k = 0; k < vm->objs[keys].b && !vm->throwing; k++) {
-                jv key = js_array_get(vm, keys, k);
-                jv v = js_get(vm, so, js_atom(vm, jv_idx(key)));
-                if (vm->throwing) return JV_HOLE;
-                /* Set(to, key, value, true): a refusal a TypeError */
-                if (!js_set_throw(vm, t, key, v)) return JV_HOLE;
-            }
+            if (vm->throwing) return JV_HOLE;
+            /* Set(to, key, value, true) for each own enumerable key, symbols' too: a refusal a TypeError */
+            if (!js_copy_own(vm, jv_idx(t), jv_idx(so), 1)) return JV_HOLE;
         }
         return vm->throwing ? JV_HOLE : t;
     }
@@ -3732,6 +3726,9 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
             if (k == JK_PROXY) { if (is_array_spec(vm, thisv)) k = JK_ARRAY; else if (vm->throwing) return JV_HOLE; }
             if (k == JK_ARRAY) t = "[object Array]";
             else if (js_is_callable(vm, thisv)) t = "[object Function]";
+            else if (k == JK_BOOLEAN) t = "[object Boolean]";
+            else if (k == JK_NUMBER) t = "[object Number]";
+            else if (k == JK_STRING) t = "[object String]";
             else if (k == JK_ERROR) t = "[object Error]";
             else if (k == JK_DATE) t = "[object Date]";
             else if (k == JK_REGEXP) t = "[object RegExp]";
@@ -4203,7 +4200,8 @@ jv js_native_call(js_vm *vm, uint32_t id, jv callee, jv thisv, uint32_t args, ui
     case N_STR_FROMCHARCODE: {
         vector<uint16_t> u;
         for (uint32_t i = 0; i < argc; i++) push_back(u, (uint16_t)(js_to_int32(js_to_number(vm, arg(vm, args, argc, i))) & 0xFFFF));
-        if (len(u) == 1 && at(u, 0) < 128) {
+        /* one ASCII unit, an atom (not U+0000, which a C string can't hold: its string is "\0", not "") */
+        if (len(u) == 1 && at(u, 0) < 128 && at(u, 0) != 0) {
             char b[2] = { (char)at(u, 0), 0 };
             return jv_str(js_atom_ascii(vm, b));
         }
@@ -5129,7 +5127,9 @@ void js_builtins_init(js_vm *vm) {
     vm->object_proto = js_obj_new(vm, JK_PLAIN, 0);
     vm->function_proto = js_obj_new(vm, JK_NATIVE, vm->object_proto);
     vm->objs[vm->function_proto].a = N_NONE;
-    vm->array_proto = js_obj_new(vm, JK_PLAIN, vm->object_proto);
+    /* Array.prototype an array itself (ECMA-262 23.1.3, V8's): its length 0, its elements an array's */
+    vm->array_proto = js_array_new(vm, 0);
+    js_set_proto(vm, vm->array_proto, vm->object_proto);
     vm->string_proto = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     vm->number_proto = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     vm->boolean_proto = js_obj_new(vm, JK_PLAIN, vm->object_proto);
@@ -5323,9 +5323,12 @@ void js_builtins_init(js_vm *vm) {
     defv(vm, m, "LOG10E", jv_num(0.4342944819032518));
     defv(vm, m, "SQRT2", jv_num(1.4142135623730951));
     defv(vm, m, "SQRT1_2", jv_num(0.7071067811865476));
+    /* Math's and JSON's tags (ECMA-262 21.3.1.9, 25.5.3): not writable, not enumerable */
+    js_define(vm, m, JS_SYM_KEY | JSYM_TO_STRING_TAG, jv_str(js_str_ascii(vm, "Math")), JS_SHAPE_HIDDEN | JS_SHAPE_READONLY);
 
     uint32_t j = js_obj_new(vm, JK_PLAIN, vm->object_proto);
     defv(vm, g, "JSON", jv_obj(j));
+    js_define(vm, j, JS_SYM_KEY | JSYM_TO_STRING_TAG, jv_str(js_str_ascii(vm, "JSON")), JS_SHAPE_HIDDEN | JS_SHAPE_READONLY);
     defn(vm, j, "stringify", N_JSON_STRINGIFY, 3);
     defn(vm, j, "parse", N_JSON_PARSE, 2);
     uint32_t c = js_obj_new(vm, JK_PLAIN, vm->object_proto);

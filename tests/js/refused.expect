@@ -1,0 +1,12 @@
+Cannot set property only of #<Base> which has only a getter
+Cannot set property only of #<Base> which has only a getter
+Cannot assign to read only property 'ro' of object '#<Derived>'
+Cannot assign to read only property 'ro' of object '#<Derived>'
+Cannot set property g of #<Object> which has only a getter
+Cannot set property q of #<P> which has only a getter
+Cannot set property only of #<Base> which has only a getter
+Cannot set property g of #<Object> which has only a getter
+Cannot set property gx of [object Array] which has only a getter
+Cannot add property foo, object is not extensible
+true [object Array] 0 []
+1 0 x

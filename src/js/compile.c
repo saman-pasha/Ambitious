@@ -394,6 +394,7 @@ static void lx(CC) {
             i += k;
             nc++;
         }
+        if (c == '#' && len(b) == 1) cc_error(cc, cc->line, "Invalid or unexpected token");
         t.type = T_NAME;
         t.str = js_atom(vm, js_str_utf8(vm, data(b), len(b)));
     } else if ((c >= '0' && c <= '9') || (c == '.' && i + 1 < srcn && src[i + 1] >= '0' && src[i + 1] <= '9')) {
@@ -1210,7 +1211,7 @@ static uint32_t p_object(CC) {
 /* an expression's node turned into an assignment's target pattern */
 static uint32_t to_pattern(CC, uint32_t e) {
     uint32_t k = cc->nodes[e].k;
-    if (k == N_IDENT || k == N_MEMBER) return e;
+    if (k == N_IDENT || k == N_MEMBER || k == N_SUPER_MEMBER) return e;
     if (k == N_ASSIGN && cc->nodes[e].op == P_ASSIGN) {
         uint32_t pe = node(cc, N_PELEM, cc->nodes[e].line);
         cc->nodes[pe].a = to_pattern(CCA, cc->nodes[e].a);
@@ -1521,7 +1522,12 @@ static uint32_t p_primary(CC) {
             }
         }
         await_reserved(CCA, a, line);
-        if (atom_priv(vm, a)) { priv_error(CCA, line, "Unexpected identifier '", a, "'"); lx(CCA); return node(cc, N_HOLE, line); }
+        if (atom_priv(vm, a)) {
+            if (cc->in_class) priv_error(CCA, line, "Unexpected identifier '", a, "'");
+            else priv_error(CCA, line, "Private field '", a, "' must be declared in an enclosing class");
+            lx(CCA);
+            return node(cc, N_HOLE, line);
+        }
         lx(CCA);
         if (is_p(cc, P_ARROW) && !cc->tok.nl) return p_name_arrow(CCA, a, 0, line, start);
         return ident_node(CCA, a, line);
@@ -1711,7 +1717,11 @@ static uint32_t p_binary(CC, int min_prec, int no_in) {
         cc->nodes[left].s = nm;
         cc->nodes[left].a = priv_ident(CCA, nm, line);
         lx(CCA);
-        if (no_in || !is_kw(cc, K_IN)) { priv_error(CCA, line, "Unexpected identifier '", nm, "'"); return left; }
+        if (no_in || !is_kw(cc, K_IN)) {
+            if (cc->in_class) priv_error(CCA, line, "Unexpected identifier '", nm, "'");
+            else priv_error(CCA, line, "Private field '", nm, "' must be declared in an enclosing class");
+            return left;
+        }
     } else left = p_unary(CCA);
     for (;;) {
         uint32_t op = 0;
@@ -1808,7 +1818,7 @@ static uint32_t p_assign_in(CC, int no_in) {
         cc->nodes[n].op = (uint16_t)op;
         uint32_t lk = cc->nodes[left].k;
         if (op == P_ASSIGN && (lk == N_ARRAY || lk == N_OBJECT)) left = to_pattern(CCA, left);
-        else if (lk != N_IDENT && lk != N_MEMBER) cc_error(cc, line, "invalid assignment target");
+        else if (lk != N_IDENT && lk != N_MEMBER && lk != N_SUPER_MEMBER) cc_error(cc, line, "invalid assignment target");
         cc->nodes[n].a = left;
         cc->nodes[n].pos = tok_start(cc);
         cc->nodes[n].b = p_assign(CCA, no_in);
@@ -3349,8 +3359,9 @@ static void gen_object(CC, uint32_t n) {
         if (pr.op == PK_GET || pr.op == PK_SET) {
             if (computed) gen_expr(CCA, pr.a);
             gen_expr(CCA, pr.b);
-            if (computed) emit(vm, pr.op == PK_GET ? OP_DEF_GET_ELEM : OP_DEF_SET_ELEM);
-            else { emit(vm, pr.op == PK_GET ? OP_DEF_GET : OP_DEF_SET); emit32(vm, cc->nodes[pr.a].s); }
+            emit(vm, computed ? (pr.op == PK_GET ? OP_DEF_GET_ELEM : OP_DEF_SET_ELEM) : (pr.op == PK_GET ? OP_DEF_GET : OP_DEF_SET));
+            emit(vm, 0);                                /* an object literal's accessor: enumerable */
+            if (!computed) emit32(vm, cc->nodes[pr.a].s);
             continue;
         }
         if (computed) { gen_expr(CCA, pr.a); gen_expr(CCA, pr.b); emit(vm, OP_DEF_ELEM); }
@@ -3409,6 +3420,7 @@ static void gen_class(CC, uint32_t ci) {
             else if (pr.op == PK_SET) op = computed ? OP_DEF_SET_ELEM : OP_DEF_SET;
             else op = computed ? OP_DEF_METHOD_ELEM : OP_DEF_METHOD;
             emit(vm, op);
+            if (pr.op == PK_GET || pr.op == PK_SET) emit(vm, 1);   /* a class's accessor: not enumerable */
             if (!computed) emit32(vm, cc->nodes[pr.a].s);
         }
         if (is_static) emit(vm, OP_SWAP);
@@ -3473,6 +3485,16 @@ static void gen_pattern(CC, uint32_t p, int init) {
     uint32_t okind = cc->pat_okind, akind = cc->pat_akind, ps = cc->pat_start, pe = cc->pat_end;
     pat_name(cc, JSS_NONE, JSS_PLAIN, 0, 0);
     if (t.k == N_IDENT) { gen_ident_put(CCA, p, 0, init); return; }
+    if (t.k == N_SUPER_MEMBER) {
+        /* v -> (k v) -> v -> nothing */
+        if (t.op & NF_COMPUTED) {
+            gen_expr(CCA, t.b);
+            emit(vm, OP_SWAP);
+            emit(vm, OP_PUT_SUPER_ELEM);
+        } else { emit(vm, OP_PUT_SUPER); emit32(vm, t.s); }
+        emit(vm, OP_POP);
+        return;
+    }
     if (t.k == N_MEMBER) {
         /* v -> o v (or o k v) -> v -> nothing */
         gen_expr(CCA, t.a);
@@ -3504,6 +3526,11 @@ static void gen_pattern(CC, uint32_t p, int init) {
             emit(vm, OP_TO_OBJECT);
             emit(vm, OP_POP);
         }
+        /* with a rest, each computed key converted once and kept in a slot of its own (cc->tmp from kmark), so that
+           the rest's copy is rid of it as of the named keys (CopyDataProperties' excluded names) */
+        int has_rest = 0;
+        for (uint32_t i = 0; i < t.b; i++) if (cc->nodes[cc->lists[t.a + i]].op & NF_REST) has_rest = 1;
+        size_t kmark = len(cc->tmp);
         for (uint32_t i = 0; i < t.b; i++) {
             uint32_t e = cc->lists[t.a + i];
             jnode el = cc->nodes[e];
@@ -3512,19 +3539,37 @@ static void gen_pattern(CC, uint32_t p, int init) {
                 emit(vm, OP_OBJECT);
                 emit(vm, OP_SWAP);
                 emit(vm, OP_COPY_PROPS);
+                size_t ck = kmark;
                 for (uint32_t j = 0; j < i; j++) {
                     jnode prev = cc->nodes[cc->lists[t.a + j]];
-                    if (prev.op & NF_COMPUTED) continue;
                     emit(vm, OP_DUP);
-                    emit(vm, OP_DEL_PROP);
-                    emit32(vm, cc->nodes[prev.c].s);
+                    if (prev.op & NF_COMPUTED) {
+                        emit(vm, OP_GET_LOC);
+                        emit16(vm, at(cc->tmp, ck));
+                        ck++;
+                        emit(vm, OP_DEL_ELEM);
+                    } else {
+                        emit(vm, OP_DEL_PROP);
+                        emit32(vm, cc->nodes[prev.c].s);
+                    }
                     emit(vm, OP_POP);
                 }
+                resize(cc->tmp, kmark);
                 gen_pattern(CCA, el.a, init);
                 continue;
             }
             emit(vm, OP_DUP);
-            if (el.op & NF_COMPUTED) { gen_expr(CCA, el.c); emit(vm, OP_GET_ELEM); }
+            if (el.op & NF_COMPUTED) {
+                gen_expr(CCA, el.c);
+                if (has_rest) {
+                    emit(vm, OP_TO_PROPKEY);
+                    uint32_t ks = new_slot(cc);
+                    emit(vm, OP_SET_LOC);
+                    emit16(vm, ks);
+                    push_back(cc->tmp, ks);
+                }
+                emit(vm, OP_GET_ELEM);
+            }
             else {
                 if (i == 0 && okind != JSS_NONE) site_at(vm, cc, JSS_DESTRUCT_OBJ | okind, ps, pe);
                 emit_atom_ic(vm, OP_GET_PROP, cc->nodes[el.c].s);
@@ -3581,6 +3626,11 @@ static void gen_assign(CC, uint32_t n) {
             return;
         }
         if (tg.k == N_IDENT) { name_fn(vm, cc, as.b, tg.s); gen_expr(CCA, as.b); gen_ident_put(CCA, t, 1, 0); return; }
+        if (tg.k == N_SUPER_MEMBER) {
+            if (tg.op & NF_COMPUTED) { gen_expr(CCA, tg.b); gen_expr(CCA, as.b); emit(vm, OP_PUT_SUPER_ELEM); }
+            else { gen_expr(CCA, as.b); emit(vm, OP_PUT_SUPER); emit32(vm, tg.s); }
+            return;
+        }
         gen_expr(CCA, tg.a);
         if (tg.op & NF_COMPUTED) { uint32_t q = gen_mkey(CCA, t); gen_expr(CCA, as.b); emit_mput(CCA, t, q); }
         else { gen_expr(CCA, as.b); emit_atom_ic(vm, OP_PUT_PROP, tg.s); }
@@ -3599,6 +3649,27 @@ static void gen_assign(CC, uint32_t n) {
         }
         gen_rhs_op(CCA, binop_of(op), as.b);
         gen_ident_put(CCA, t, 1, 0);
+        return;
+    }
+    if (tg.k == N_SUPER_MEMBER) {
+        /* super's: read from the home object's prototype, set there with this the receiver */
+        int sc = tg.op & NF_COMPUTED;
+        if (sc) { gen_expr(CCA, tg.b); emit(vm, OP_DUP); emit(vm, OP_GET_SUPER_ELEM); }
+        else { emit(vm, OP_GET_SUPER); emit32(vm, tg.s); }
+        if (logical) {
+            uint32_t keep = jump_fwd(vm, jop);
+            gen_expr(CCA, as.b);
+            if (sc) emit(vm, OP_PUT_SUPER_ELEM);
+            else { emit(vm, OP_PUT_SUPER); emit32(vm, tg.s); }
+            uint32_t end = jump_fwd(vm, OP_JMP);
+            patch_to(vm, keep, here(vm));
+            if (sc) { emit(vm, OP_SWAP); emit(vm, OP_POP); }
+            patch_to(vm, end, here(vm));
+            return;
+        }
+        gen_rhs_op(CCA, binop_of(op), as.b);
+        if (sc) emit(vm, OP_PUT_SUPER_ELEM);
+        else { emit(vm, OP_PUT_SUPER); emit32(vm, tg.s); }
         return;
     }
     if (tg.k != N_MEMBER) { cc_error(cc, as.line, "invalid assignment target"); return; }
@@ -3636,6 +3707,22 @@ static void gen_update(CC, uint32_t n, int force_prefix) {
         emit(vm, OP_DUP);
         emit(vm, step);
         gen_ident_put(CCA, t, 0, 0);
+        return;
+    }
+    if (tg.k == N_SUPER_MEMBER) {
+        int sc = tg.op & NF_COMPUTED;
+        if (sc) { gen_expr(CCA, tg.b); emit(vm, OP_DUP); emit(vm, OP_GET_SUPER_ELEM); }
+        else { emit(vm, OP_GET_SUPER); emit32(vm, tg.s); }
+        if (!prefix) {
+            /* the old value, a number, kept below */
+            emit(vm, OP_TONUM);
+            emit(vm, OP_DUP);
+            if (sc) emit(vm, OP_ROT3);
+        }
+        emit(vm, step);
+        if (sc) emit(vm, OP_PUT_SUPER_ELEM);
+        else { emit(vm, OP_PUT_SUPER); emit32(vm, tg.s); }
+        if (!prefix) emit(vm, OP_POP);
         return;
     }
     if (tg.k != N_MEMBER) { cc_error(cc, u.line, "invalid target of ++ or --"); return; }
@@ -3762,6 +3849,12 @@ static void gen_expr(CC, uint32_t n) {
                 gen_expr(CCA, a.a);
                 if (a.op & NF_COMPUTED) { gen_expr(CCA, a.b); emit(vm, OP_DEL_ELEM); }
                 else { emit(vm, OP_DEL_PROP); emit32(vm, a.s); }
+                return;
+            }
+            if (a.k == N_SUPER_MEMBER) {
+                if (a.op & NF_COMPUTED) { gen_expr(CCA, a.b); emit(vm, OP_POP); }
+                emit(vm, OP_DELETE_SUPER);
+                emit(vm, OP_TRUE);
                 return;
             }
             if (a.k != N_IDENT) { gen_expr(CCA, e.a); emit(vm, OP_POP); }
@@ -4761,6 +4854,15 @@ int js_compile(js_vm *vm, const char *src, size_t n, uint32_t script, int mode, 
     }
     cc->line = 1;
     cc->tok.type = T_EOF;
+    /* a hashbang comment (#! to its line's end) at the very start of a script's, a module's or an eval's source
+       (ECMA-262 12.5), not a function's body (the Function constructor's, a handler's) */
+    if (mode != JS_CC_FUNCTION && mode != JS_CC_HANDLER && srcn >= 2 && src[0] == '#' && src[1] == '!') {
+        uint32_t i = 2;
+        while (i < srcn && src[i] != '\n' && src[i] != '\r' &&
+               !(i + 2 < srcn && (uint8_t)src[i] == 0xE2 && (uint8_t)src[i + 1] == 0x80 && ((uint8_t)src[i + 2] == 0xA8 || (uint8_t)src[i + 2] == 0xA9)))
+            i++;
+        cc->pos = i;
+    }
     /* an eval's let, const and class its own, in a scope above its var scope */
     uint32_t body_scope = is_eval ? scope_new(cc, SC_EVAL) : 0;
     if (is_eval) cc->cur_scope = body_scope;
